@@ -38,6 +38,7 @@ import sys
 import time
 import zmq
 import numpy as np
+import os
 
 from caffe2.python import workspace
 
@@ -51,6 +52,8 @@ import detectron.core.test_engine as infer_engine
 import detectron.datasets.dummy_datasets as dummy_datasets
 import detectron.utils.c2 as c2_utils
 import detectron.utils.vis as vis_utils
+from multiprocessing import Process, Queue
+import json
 
 c2_utils.import_detectron_ops()
 
@@ -135,7 +138,8 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
     #     kp_thresh=2
     # )
     t = time.time()
-    im = vis_utils.vis_one_image_opencv(
+    img_debug = True
+    im, mid_im, top_im, result= vis_utils.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
         cls_segms,
@@ -143,14 +147,44 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         dataset=dataset,
         show_class=True,
         thresh=0.7,
-        kp_thresh=2
+        kp_thresh=2,
+        frame_id=frameId,
+        img_debug = img_debug
     )
     logger.info('vis_one_image_opencv time: {:.3f}s'.format(time.time() - t))
-    cv2.imshow('carlab', im)
-    cv2.waitKey(1)
+    add2MsgQueue(result, frameId)
 
+
+    if img_debug:
+        half_size = (int(im.shape[1]/2), int(im.shape[0]/2))
+        im = cv2.resize(im, half_size)
+        top_im = cv2.resize(top_im, half_size)
+        mid_im = mid_im[604:902, 0:1920]
+        mid_im = cv2.resize(mid_im, (960, 150))
+        # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
+        # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
+        # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
+
+        cv2.imshow('carlab1', im)
+        cv2.imshow('carlab2', mid_im)
+        cv2.imshow('carlab3', top_im)
+        cv2.waitKey(1)
+
+def add2MsgQueue(result, frameId):
+    #{'frameid':id, 'line_list':[{"curve_param":[], "type":'bundary'},{}], 'timestamp':123}
+    line_list = []
+    for (line_param, line_type) in zip(result[0], result[1]):
+        line_info = {'curve_param':line_param.tolist(), 'type':line_type}
+        line_list.append(line_info)
+    finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
+    print ("finalMessage:" + str(finalMessage))
+    json_str = json.dumps(finalMessage)
+    if mQueue.full():
+        mQueue.get_nowait()
+    mQueue.put(json_str)
 
 def main(args):
+
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
     cfg.NUM_GPUS = 1
@@ -196,15 +230,33 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId % 2 == 0:
+        if frameId % 20 == 0:
             t = time.time()
+
+            # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+
+
+def result_sender():
+    print ("sender process start !")
+    context = zmq.Context()
+    socket = context.socket(zmq.REP)
+    socket.bind("tcp://*:6701")
+    while(True):
+        message = mQueue.get(True)
+        if not message is None:
+            recv = socket.recv()
+            print ("Received request:%s" % recv)
+            socket.send(message)
 
 
 if __name__ == '__main__':
     workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
     setup_logging(__name__)
     args = parse_args()
+    mQueue = Queue(10)
+    p = Process(target=result_sender)
+    p.start()
     main(args)
 

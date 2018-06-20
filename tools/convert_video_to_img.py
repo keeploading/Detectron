@@ -67,14 +67,15 @@ def parse_args():
         '--subsample',
         dest='subsample',
         help='subsample from frames',
-        default=10,
+        default=20,
         type=str
     )
     parser.add_argument(
         '--output-dir',
         dest='output_dir',
         help='directory for visualization pdfs (default: /tmp/infer_simple)',
-        default='/media/administrator/deeplearning/self-labels/leftImg8bit/train/test',
+        # default='/media/administrator/deeplearning/self-labels/leftImg8bit/train/test',
+        default='/media/administrator/deeplearning/self-labels/result-20',
         type=str
     )
     return parser.parse_args()
@@ -102,7 +103,7 @@ def main(args):
             img_np = cv2.cvtColor(img_np,cv2.COLOR_BGR2RGB)
             im = Image.fromarray(img_np)
             # im = im.convert('P')
-            file = "sh_{0:06}_000001_leftImg8bit.png".format(fileId)
+            file = "sh_{0:06}_000001_leftImg8bit.png".format(frameId)
             im.save(os.path.join(args.output_dir, file))
             print ("finish save image ---> " + file)
             fileId += 1
