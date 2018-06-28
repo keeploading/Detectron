@@ -39,6 +39,9 @@ from matplotlib.patches import Polygon
 from scipy.misc import comb
 from scipy import optimize
 import math
+import logging
+import sys
+import time
 
 plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 
@@ -51,15 +54,15 @@ IMAGE_HEI = 1208
 SLOPE_LIMITED = 1208./540#2*LANE_WID
 
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
-lane_wid = IMAGE_WID / 7
+lane_wid = 200
 scale_h = 0.05
-scale_w = 0.25
-offset_x = lane_wid * (1-scale_w) / 2
+scale_w = 0.28
+offset_x = lane_wid * scale_w / 2
 offset_y = 1 - scale_h
-dest_arr = np.float32([[lane_wid*3 + offset_x, IMAGE_HEI * offset_y],
-                       [lane_wid * 4 - offset_x, IMAGE_HEI * offset_y],
-                        [lane_wid * 4 - offset_x, IMAGE_HEI - 1],
-                         [lane_wid * 3 + offset_x, IMAGE_HEI - 1]])
+dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
+                       [IMAGE_WID / 2  + offset_x, IMAGE_HEI * offset_y],
+                        [IMAGE_WID / 2 + offset_x, IMAGE_HEI - 1],
+                         [IMAGE_WID / 2 - offset_x, IMAGE_HEI - 1]])
 H = cv2.getPerspectiveTransform(source_arr, dest_arr)
 print ("H:" + str(H))
 print ("lane_wid:" + str(lane_wid))
@@ -157,11 +160,17 @@ def get_class_string(class_index, score, dataset):
         'id{:d}'.format(class_index)
     return class_text + ' {:0.2f}'.format(score).lstrip('0')
 
-def add2curve(curve_objs, point, type):
+def get_class(class_index, dataset):
+    class_text = dataset.classes[class_index] if dataset is not None else \
+        'id{:d}'.format(class_index)
+    return class_text
+
+def add2curve(curve_objs, point, type, score):
     matched = False
     for obj in curve_objs:
         if(obj["classes"] == type and (abs(obj["points"][0][0] - point[0]) < 50 or abs(obj["points"][-1][0] - point[0]) < 50)):
             obj["points"].append(point)
+
             if obj["start_x_left"] > point[2]:
                 obj["start_x_left"] = point[2]
             if obj["start_x_right"] < point[2]:
@@ -173,16 +182,16 @@ def add2curve(curve_objs, point, type):
             matched = True
     if matched:
         return
-    curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2], "end_x_left":point[3], "classes": type}
+    curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2], "end_x_left":point[3], "classes": type, "score":score}
     curve_objs.append(curve)
 
-def find_curve_objs(curve_objs, mask, classs_type):
+def find_curve_objs(curve_objs, mask, classs_type, score):
 
     line_class = dummy_datasets.get_line_dataset()
     top_idx = None
     if classs_type in line_class:
 
-        mask = cv2.undistort(mask, mtx, dist, None)
+        # mask = cv2.undistort(mask, mtx, dist, None)
         top = cv2.warpPerspective(mask, H, (1920,1208))
         top_idx = np.nonzero(top)
         points = np.array(zip(top_idx[0], top_idx[1]))
@@ -192,13 +201,13 @@ def find_curve_objs(curve_objs, mask, classs_type):
             x_end = x_start
             for index in range(len(points)):
                 if points[index][0] != y_start:
-                    add2curve(curve_objs, [(x_end + x_start) / 2, y_start, x_start, x_end], classs_type)
+                    add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
                     y_start = points[index][0]
                     x_start = points[index][1]
                     x_end = x_start
                 else:
                     if points[index][1] - x_end > 50:
-                        add2curve(curve_objs, [(x_end + x_start)/2, y_start, x_start, x_end], classs_type)
+                        add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
                         y_start = points[index][0]
                         x_start = points[index][1]
                         x_end = x_start
@@ -206,7 +215,7 @@ def find_curve_objs(curve_objs, mask, classs_type):
                         x_end = points[index][1]
     return mask, top_idx
 
-def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, alpha=0.4, show_border=True, border_thick=1):
+def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
     """Visualizes a single binary mask."""
 
     color = dummy_datasets.get_color_dataset(classs_type)
@@ -217,7 +226,7 @@ def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, alpha=0.
     line_class = dummy_datasets.get_line_dataset()
     if classs_type in line_class:
         perspective_img = perspective_img.astype(np.float32)
-        mask, top_idx = find_curve_objs(curve_objs, mask, classs_type)
+        mask, top_idx = find_curve_objs(curve_objs, mask, classs_type, score)
         perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
         perspective_img[top_idx[0], top_idx[1], :] += alpha * col
 
@@ -403,9 +412,11 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
                 mid_im = vis_roi(mid_im, masks[..., i], dummy_datasets.get_color_dataset(type))
 
             if img_debug:
-                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type)
+                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type, score)
             else:
-                find_curve_objs(curve_objs, masks[..., i], type)
+                t = time.time()
+                find_curve_objs(curve_objs, masks[..., i], type, score)
+                print ('loop for find_curve_objs time: {:.3f}s'.format(time.time() - t))
 
         # show keypoints
         if img_debug and (keypoints is not None and len(keypoints) > i):
@@ -421,6 +432,8 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
         curve = np.array(np.array(curve_obj["points"])[:, 0:2])
         curve = curve[0: len(curve): 10]
         curve = curve[curve[:,1].argsort()]
+        # curve = curve - [im.shape[1]/2, 0]
+        # curve = curve - [0, im.shape[0]/2]
         curve_type = curve_obj["classes"]
         middle = (curve_obj["end_x_right"] + curve_obj["start_x_left"]) / 2
         # points = bezier_curve(curve, nTimes=len(curve))
@@ -435,20 +448,19 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
             print ("mask area not good! frame_id:" + str(frame_id))
             continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(parabola2, curve[:, 1], curve[:, 0])[0]
-        parabola_param = [parabola_A, parabolaB, parabolaC, middle]#, curve_obj["classes"]
+        parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
         parabola_params.append(parabola_param)
         classes_param.append(curve_type)
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < im.shape[1]:
+        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < 0:
             if (left_boundary is None) or \
                     ((not left_boundary is None) and left_boundary[-1] < parabola_param[-1]):
                 parabola_param[-1] = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
                 left_boundary = parabola_param
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > im.shape[1]:
+        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > 0:
             if (right_boundary is None) or \
                     ((not right_boundary is None) and right_boundary[-1] > parabola_param[-1]):
                 parabola_param[-1] = (curve_obj["start_x_right"] + curve_obj["start_x_left"]) / 2
                 right_boundary = parabola_param
-    print ("len(parabola_param):" + str(len(parabola_params)))
     parabola_param_np = np.array(parabola_params)
     classes_param = np.array(classes_param)
     if not left_boundary is None:
@@ -461,24 +473,23 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
         classes_param = classes_param[keep_index]
     # parabola_param_np = parabola_param_np[:,0:3]
 
-    print ("len(parabola_param_np):" + str(len(parabola_param_np)))
     good_parabola, index_param = get_good_parabola(parabola_param_np)
     if good_parabola is None:
         print ("errer: bad frame detection !")
-    curve = np.arange(0, 1200, 10)
+    curve = np.arange(-1200, 0, 10)
     for index, parabola in enumerate(parabola_param_np):
         if index == index_param:
             if img_debug:
                 y = parabola[0] * curve * curve + parabola[1] * curve + parabola[2]
                 color = (100, 0, 20)
-                cv2.polylines(perspective_img, np.int32([np.vstack((y, curve)).T]), False, color, thickness=10)
+                cv2.polylines(perspective_img, np.int32([np.vstack((y + im.shape[1]/2, curve + im.shape[0])).T]), False, color, thickness=10)
         else:
-            predict_parabola = get_parabola_by_distance(good_parabola, parabola[3] - good_parabola[3])
+            predict_parabola = get_parabola_by_distance(good_parabola, parabola[-1] - good_parabola[-1])
             parabola_param_np[index][0:3] = predict_parabola
             if img_debug:
                 color = (255, 255, 255)
                 y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
-                cv2.polylines(perspective_img, np.int32([np.vstack((y, curve)).T]), False, color, thickness=10)
+                cv2.polylines(perspective_img, np.int32([np.vstack((y + im.shape[1]/2, curve + im.shape[0])).T]), False, color, thickness=10)
 
     if not perspective_img is None:
         perspective_img = perspective_img.astype(np.float32)
@@ -551,6 +562,7 @@ def get_good_parabola(coefficient):
             good_parabola = param
             good_index = index
 
+
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):
@@ -589,10 +601,10 @@ def get_parabols_by_points(pints):
     y2 = pints[1][1]
     x3 = pints[2][0]
     y3 = pints[2][1]
-    denom = (x1 - x2) * (x1 - x3) * (x2 - x3);
-    A = (x3 * (y2 - y1) + x2 * (y1 - y3) + x1 * (y3 - y2)) / denom;
-    B = (x3 * x3 * (y1 - y2) + x2 * x2 * (y3 - y1) + x1 * x1 * (y2 - y3)) / denom;
-    C = (x2 * x3 * (x2 - x3) * y1 + x3 * x1 * (x3 - x1) * y2 + x1 * x2 * (x1 - x2) * y3) / denom;
+    denom = (x1 - x2) * (x1 - x3) * (x2 - x3)
+    A = (x3 * (y2 - y1) + x2 * (y1 - y3) + x1 * (y3 - y2)) / denom
+    B = (x3 * x3 * (y1 - y2) + x2 * x2 * (y3 - y1) + x1 * x1 * (y2 - y3)) / denom
+    C = (x2 * x3 * (x2 - x3) * y1 + x3 * x1 * (x3 - x1) * y2 + x1 * x2 * (x1 - x2) * y3) / denom
     return [A, B, C]
 
 def vis_one_image(

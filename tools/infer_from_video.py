@@ -54,6 +54,7 @@ import detectron.utils.c2 as c2_utils
 import detectron.utils.vis as vis_utils
 from multiprocessing import Process, Queue
 import json
+from arp.detection_filter import get_predict_list
 
 c2_utils.import_detectron_ops()
 
@@ -124,19 +125,6 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
             'rest (caches and auto-tuning need to warm up)'
         )
 
-    # vis_utils.vis_one_image(
-    #     im[:, :, ::-1],  # BGR -> RGB for visualization
-    #     '{}'.format(frameId),
-    #     args.output_dir,
-    #     cls_boxes,
-    #     cls_segms,
-    #     cls_keyps,
-    #     dataset=dataset,
-    #     box_alpha=0.3,
-    #     show_class=True,
-    #     thresh=0.7,
-    #     kp_thresh=2
-    # )
     t = time.time()
     img_debug = True
     im, mid_im, top_im, result= vis_utils.get_detection_line(
@@ -152,7 +140,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         img_debug = img_debug
     )
     logger.info('vis_one_image_opencv time: {:.3f}s'.format(time.time() - t))
-    add2MsgQueue(result, frameId)
+    add2MsgQueue(result, frameId, img_debug)
 
 
     if img_debug:
@@ -170,12 +158,35 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         cv2.imshow('carlab3', top_im)
         cv2.waitKey(1)
 
-def add2MsgQueue(result, frameId):
-    #{'frameid':id, 'line_list':[{"curve_param":[], "type":'bundary'},{}], 'timestamp':123}
+def add2MsgQueue(result, frameId, img_debug):
     line_list = []
+
     for (line_param, line_type) in zip(result[0], result[1]):
-        line_info = {'curve_param':line_param.tolist(), 'type':line_type}
+        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
         line_list.append(line_info)
+    line_list, cache_list = get_predict_list(line_list)
+    if img_debug and (not line_list is None) and (not cache_list is None) :
+        x_pos = []
+        x_pos_11 = []
+        for i in range(-960, 960, 1):
+            matched_y = 5
+            matched_y_11 = 10
+            for l in line_list:
+                if abs(l['x'] - i) < 5:
+                    matched_y = int(100 * l['score'] -5 )
+            for l in cache_list:
+                if abs(l['x'] - i) < 10:
+                    matched_y_11 = int(100 * l['score'])
+            x_pos.append([i + 960, matched_y])
+            x_pos_11.append([i + 960, matched_y_11])
+        h = np.zeros((100, 1920, 3))
+        cv2.polylines(h, [np.array(x_pos)], False, (0,255,0))
+        cv2.polylines(h, [np.array(x_pos_11)], False, (0,0,255))
+        h = np.flipud(h)
+        h = cv2.resize(h, (960, 100))
+        cv2.imshow('prob', h)
+        cv2.waitKey(1)
+
     finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
     print ("finalMessage:" + str(finalMessage))
     json_str = json.dumps(finalMessage)
@@ -230,25 +241,29 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId % 20 == 0:
+        if frameId % 2 == 0:
             t = time.time()
 
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
-            logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+            # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
 
 def result_sender():
     print ("sender process start !")
     context = zmq.Context()
     socket = context.socket(zmq.REP)
+    socket.setsockopt(zmq.SNDTIMEO, 3000)
     socket.bind("tcp://*:6701")
     while(True):
         message = mQueue.get(True)
         if not message is None:
             recv = socket.recv()
             print ("Received request:%s" % recv)
-            socket.send(message)
+            try:
+                socket.send(message)
+            except zmq.ZMQError:
+                time.sleep(1)
 
 
 if __name__ == '__main__':
