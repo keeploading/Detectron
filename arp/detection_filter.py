@@ -1,15 +1,15 @@
 import numpy as np
+from detectron.utils.vis import lane_wid, get_parabola_by_distance
 #bind with detect spped, later
 SCORE_DEFAULT = 0.2
 LINE_MOVE_WEIGHT = 0.3
 LINE_SCORE_WEIGHT = 0.9
 MAX_CACHE = 50
-TOP_IMG_WID = 1920
-WID_LANE = 200
+WID_LANE = lane_wid
 #[{x, score, type}]
 cache_list = []
 
-def get_predict_list(line_list):
+def get_predict_list(line_list, frameId):
     global cache_list
 
     #remove duplicate line
@@ -77,6 +77,19 @@ def get_predict_list(line_list):
         for id in range(len(cache_list)):
             if not id in match_id_array:
                 cache_list[id]['score'] = LINE_SCORE_WEIGHT * cache_list[id]['score'] + (1 - LINE_SCORE_WEIGHT) * (SCORE_DEFAULT /2)
+                if frameId == 4840:
+                    pass
+                for index in range(len(cache_list)):
+                    if (id + index) in match_id_array:
+                        cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id + index]['curve_param'],
+                                                                                 cache_list[id]['x'] -
+                                                                                 cache_list[id + index]['x'])
+                        break
+                    elif (id - index) in match_id_array:
+                        cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id - index]['curve_param'],
+                                                                                 cache_list[id]['x'] -
+                                                                                 cache_list[id - index]['x'])
+                        break
 
         cache_list.extend(add_line)
 
@@ -105,6 +118,7 @@ def get_predict_list(line_list):
     for line in filter_list:
         if (len(filter_pos) > 0):
             if abs(line['x'] - filter_pos[-1]['x']) < WID_LANE / 4:
+                filter_pos[-1]['type'] = line['type'] if line['score'] > filter_pos[-1]['score'] else filter_pos[-1]['type']
                 percent = line['score'] / (line['score'] + filter_pos[-1]['score'])
                 filter_pos[-1]['x'] = line['x'] * percent + filter_pos[-1]['x']*(1-percent)
                 score = line['score'] + filter_pos[-1]['score']
