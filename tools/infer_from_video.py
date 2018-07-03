@@ -38,6 +38,7 @@ import sys
 import time
 import zmq
 import numpy as np
+import os
 
 from caffe2.python import workspace
 
@@ -51,6 +52,11 @@ import detectron.core.test_engine as infer_engine
 import detectron.datasets.dummy_datasets as dummy_datasets
 import detectron.utils.c2 as c2_utils
 import detectron.utils.vis as vis_utils
+import arp.line_detection as detection
+from multiprocessing import Process, Queue
+import json
+from arp.detection_filter import get_predict_list
+from detectron.utils.vis import dist, mtx, IMAGE_WID, IMAGE_HEI
 
 c2_utils.import_detectron_ops()
 
@@ -121,21 +127,9 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
             'rest (caches and auto-tuning need to warm up)'
         )
 
-    # vis_utils.vis_one_image(
-    #     im[:, :, ::-1],  # BGR -> RGB for visualization
-    #     '{}'.format(frameId),
-    #     args.output_dir,
-    #     cls_boxes,
-    #     cls_segms,
-    #     cls_keyps,
-    #     dataset=dataset,
-    #     box_alpha=0.3,
-    #     show_class=True,
-    #     thresh=0.7,
-    #     kp_thresh=2
-    # )
     t = time.time()
-    im = vis_utils.vis_one_image_opencv(
+    img_debug = False
+    im, mid_im, top_im, result= detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
         cls_segms,
@@ -143,14 +137,75 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         dataset=dataset,
         show_class=True,
         thresh=0.7,
-        kp_thresh=2
+        kp_thresh=2,
+        frame_id=frameId,
+        img_debug = img_debug
     )
     logger.info('vis_one_image_opencv time: {:.3f}s'.format(time.time() - t))
-    cv2.imshow('carlab', im)
-    cv2.waitKey(1)
+    add2MsgQueue(result, frameId, img_debug)
 
+
+    if img_debug:
+        half_size = (int(im.shape[1]/2), int(im.shape[0]/2))
+        if IMAGE_WID > 960:
+            im = cv2.resize(im, half_size)
+            top_im = cv2.resize(top_im, half_size)
+            mid_im = mid_im[604:902, 0:IMAGE_WID]
+            mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
+        else:
+            mid_im = mid_im[302:451, 0:IMAGE_WID]
+        # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
+        # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
+        # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
+
+        cv2.imshow('carlab1', im)
+        cv2.imshow('carlab2', mid_im)
+        cv2.imshow('carlab3', top_im)
+        cv2.waitKey(1)
+
+def add2MsgQueue(result, frameId, img_debug):
+    line_list = []
+    if (result is None) or len(result[0]) == 0:
+        print ("error: len(line_list) == 0")
+        return
+
+    for (line_param, line_type) in zip(result[0], result[1]):
+        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
+        line_list.append(line_info)
+    line_list, cache_list = get_predict_list(line_list, frameId)
+    if img_debug and (not line_list is None) and (not cache_list is None) :
+        x_pos = []
+        x_pos_11 = []
+        for i in range(-int(IMAGE_WID/2), int(IMAGE_WID/2), 1):
+            matched_y = 5
+            matched_y_11 = 10
+            for l in line_list:
+                if abs(l['x'] - i) < 5:
+                    matched_y = int(100 * l['score'] -5 )
+            for l in cache_list:
+                if abs(l['x'] - i) < 10:
+                    matched_y_11 = int(100 * l['score'])
+            x_pos.append([i + int(IMAGE_WID/2), matched_y])
+            x_pos_11.append([i + int(IMAGE_WID/2), matched_y_11])
+        h = np.zeros((100, IMAGE_WID, 3))
+        cv2.polylines(h, [np.array(x_pos)], False, (0,255,0))
+        cv2.polylines(h, [np.array(x_pos_11)], False, (0,0,255))
+        h = np.flipud(h)
+
+        if IMAGE_WID > 960:
+            h = cv2.resize(h, (int(IMAGE_WID/2), 100))
+        cv2.imshow('prob', h)
+        cv2.waitKey(1)
+
+    finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
+    print ("finalMessage:" + str(finalMessage))
+    json_str = json.dumps(finalMessage)
+    if mQueue.full():
+        mQueue.get_nowait()
+    mQueue.put(json_str)
 
 def main(args):
+
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
     cfg.NUM_GPUS = 1
@@ -196,15 +251,38 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId % 2 == 0:
+        if frameId % 20 == 0:
             t = time.time()
+            # img_np = img_np[::2]
+            # img_np = img_np[:,::2]
+            # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
-            logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+            # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+
+
+def result_sender():
+    print ("sender process start !")
+    context = zmq.Context()
+    socket = context.socket(zmq.REP)
+    socket.setsockopt(zmq.SNDTIMEO, 3000)
+    socket.bind("tcp://*:6701")
+    while(True):
+        message = mQueue.get(True)
+        if not message is None:
+            recv = socket.recv()
+            print ("Received request:%s" % recv)
+            try:
+                socket.send(message)
+            except zmq.ZMQError:
+                time.sleep(1)
 
 
 if __name__ == '__main__':
     workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
     setup_logging(__name__)
     args = parse_args()
+    mQueue = Queue(10)
+    p = Process(target=result_sender)
+    p.start()
     main(args)
 

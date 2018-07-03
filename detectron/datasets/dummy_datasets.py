@@ -23,6 +23,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from detectron.utils.collections import AttrDict
+import numpy as np
 
 
 def get_coco_dataset():
@@ -99,3 +100,35 @@ def get_coco_dataset():
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds
+
+
+
+def get_line_dataset():
+    classes = ['__background__',
+        'dashed',
+        'solid',
+        'solid solid',
+        'dashed dashed',
+        'dashed-solid',
+        'solid-dashed',
+        'yellow dashed',
+        'yellow solid',
+        'yellow solid solid',
+        'yellow dashed dashed',
+        'yellow dashed-solid',
+        'yellow solid-dashed',
+        'boundary'
+    ]
+    return classes
+
+def get_color_dataset(classes):
+
+    color_list = {'dashed':[1., 0., 0.],
+                  'solid':[0., 1., 0.],
+                  'boundary':[0., 0., 1.],
+                  'solid solid':[1., 1., 0.],
+                  'dashed dashed':[0., 1., 1.]
+                  }
+    if not classes in color_list:
+        return None
+    return np.array(color_list[classes]) *255
