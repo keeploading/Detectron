@@ -36,12 +36,13 @@ import detectron.datasets.dummy_datasets as dummy_datasets
 envu.set_up_matplotlib()
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
-from scipy.misc import comb
 from scipy import optimize
 import math
 import logging
 import sys
 import time
+import arp.math_utils as math_utils
+
 from multiprocessing import Process, Manager
 
 plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
@@ -79,67 +80,194 @@ CURVETURE_MAX = 50.0/(IMAGE_HEI*IMAGE_HEI)
 manager = Manager()
 masks_list = manager.dict()
 
-def parabola2(x, A, B, C):
-    return A*x*x + B*x + C
 
-def bernstein_poly(i, n, t):
-    """
-     The Bernstein polynomial of n, i as a function of t
-    """
+def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thresh=2,
+        show_box=True, dataset=None, show_class=False, frame_id = 0, img_debug = False):
 
-    return comb(n, i) * ( t**(n-i) ) * (1 - t)**i
+    """Constructs a numpy array with the detections visualized."""
 
+    if isinstance(boxes, list):
+        boxes, segms, keypoints, classes = convert_from_cls_format(
+            boxes, segms, keypoints)
+    if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
+        return im
 
+    if segms is not None and len(segms) > 0:
+        masks = mask_util.decode(segms)
+        color_list = colormap()
+        mask_color_id = 0
 
-def bezier_curve(points, nTimes=1000):
-    """
-       Given a set of control points, return the
-       bezier curve defined by the control points.
+    # perspective
+    masks_list.clear()
+    t = time.time()
+    line_class = dummy_datasets.get_line_dataset()
 
-       points should be a list of lists, or list of tuples
-       such as [ [1,1],
-                 [2,3],
-                 [4,5], ..[Xn, Yn] ]
-        nTimes is the number of time steps, defaults to 1000
-
-
-        See http://processingjs.nihongoresources.com/bezierinfo/
-    """
-
-    nPoints = len(points)
-    xPoints = np.array([p[0] for p in points])
-    yPoints = np.array([p[1] for p in points])
-
-    t = np.linspace(0.0, 1.0, nTimes)
-
-    polynomial_array = np.array([ bernstein_poly(i, nPoints-1, t) for i in range(0, nPoints)   ])
-
-    xvals = np.dot(xPoints, polynomial_array)
-    yvals = np.dot(yPoints, polynomial_array)
-
-    return np.vstack((xvals, yvals)).T
+    # Display in largest to smallest order to reduce occlusion
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    sorted_inds = np.argsort(-areas)
 
 
-def kp_connections(keypoints):
-    kp_lines = [
-        [keypoints.index('left_eye'), keypoints.index('right_eye')],
-        [keypoints.index('left_eye'), keypoints.index('nose')],
-        [keypoints.index('right_eye'), keypoints.index('nose')],
-        [keypoints.index('right_eye'), keypoints.index('right_ear')],
-        [keypoints.index('left_eye'), keypoints.index('left_ear')],
-        [keypoints.index('right_shoulder'), keypoints.index('right_elbow')],
-        [keypoints.index('right_elbow'), keypoints.index('right_wrist')],
-        [keypoints.index('left_shoulder'), keypoints.index('left_elbow')],
-        [keypoints.index('left_elbow'), keypoints.index('left_wrist')],
-        [keypoints.index('right_hip'), keypoints.index('right_knee')],
-        [keypoints.index('right_knee'), keypoints.index('right_ankle')],
-        [keypoints.index('left_hip'), keypoints.index('left_knee')],
-        [keypoints.index('left_knee'), keypoints.index('left_ankle')],
-        [keypoints.index('right_shoulder'), keypoints.index('left_shoulder')],
-        [keypoints.index('right_hip'), keypoints.index('left_hip')],
-    ]
-    return kp_lines
+    im = np.array(im)
+    curve_objs = []
+    # del curve_objs[:]
+    mid_im = None
+    perspective_img = None
+    if img_debug:
+        mid_im = np.zeros(im.shape, np.uint8)
+        perspective_img = np.zeros(im.shape, np.uint8)
 
+    t = time.time()
+    for i in sorted_inds:
+        bbox = boxes[i, :4]
+        score = boxes[i, -1]
+        if score < thresh:
+            continue
+        # show box (off by default)
+
+        if show_box and img_debug:
+            im = vis_bbox(
+                im, (bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]))
+
+        class_str = get_class_string(classes[i], score, dataset)
+        # show class (off by default)
+        if show_class and img_debug:
+            im = vis_class(im, (bbox[0], bbox[1] - 2), class_str)
+
+        # show mask
+        if segms is not None and len(segms) > i:
+            color_mask = color_list[mask_color_id % len(color_list), 0:3]
+            mask_color_id += 1
+            type = ' '.join(class_str.split(' ')[:-1])
+            color = dummy_datasets.get_color_dataset(type)
+            # if not color is None:
+            #     color_mask = color
+            if img_debug and (type in line_class):
+                mid_im = vis_roi(mid_im, masks[..., i], color_mask)
+
+            if img_debug:
+                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type, score)
+            elif type in line_class:
+                t_find_curve = time.time()
+                build_curve_objs(curve_objs, masks[..., i], type, score)
+                print ("find_curve_objs time:{}".format(time.time() - t_find_curve) )
+
+    print ('loop for find_curve_objs time: {:.3f}s'.format(time.time() - t))
+
+    parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug)
+    return im, mid_im, perspective_img, parabola_params
+
+def optimize_parabola(perspective_img, curve_objs, img_debug):
+    if len(curve_objs) == 0:
+        return
+    parabola_params = []
+    left_boundary = None
+    right_boundary = None
+    classes_param = []
+
+    t = time.time()
+    print ("len(curve_objs):" + str(len(curve_objs)))
+    for curve_obj in curve_objs:
+        length = len(curve_obj["points"])
+        if length < 5:
+            print ("number of points not much!" + str(length))
+            continue
+        curve = np.array(np.array(curve_obj["points"]))#[30:length-20, 0:2])
+        # curve = curve[0: len(curve): 10]
+        curve = curve[curve[:,1].argsort()]
+        # curve = curve - [im.shape[1]/2, 0]
+        # curve = curve - [0, im.shape[0]/2]
+        curve_type = curve_obj["classes"]
+        middle = (curve_obj["end_x_right"] + curve_obj["start_x_left"]) / 2
+        max_y = max(curve[:,1])
+        min_y = min(curve[:,1])
+        offset_y = max_y - min_y
+        offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
+        if offset_x > lane_wid/2 and float(offset_y) / offset_x < SLOPE_LIMITED:
+            print ("min_y:" + str(min_y))
+            print ("max_y:" + str(max_y))
+            print ("min_x:" + str(curve_obj["start_x_left"]))
+            print ("max_x:" + str(curve_obj["end_x_right"]))
+            continue
+        parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
+        parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
+        parabola_params.append(parabola_param)
+        classes_param.append(curve_type)
+        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < 0:
+            if (left_boundary is None) or \
+                    ((not left_boundary is None) and left_boundary[-1] < parabola_param[-1]):
+                adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
+                parabola_param[2] += (adjust_x - parabola_param[-1])
+                parabola_param[-1] = adjust_x
+                left_boundary = parabola_param
+        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > 0:
+            if (right_boundary is None) or \
+                    ((not right_boundary is None) and right_boundary[-1] > parabola_param[-1]):
+                adjust_x = (curve_obj["start_x_right"] + curve_obj["start_x_left"]) / 2
+                parabola_param[2] += (adjust_x - parabola_param[-1])
+                parabola_param[-1] = adjust_x
+                right_boundary = parabola_param
+    parabola_param_np = np.array(parabola_params)
+    classes_param = np.array(classes_param)
+    if not left_boundary is None:
+        keep_index = parabola_param_np[:,-1] >= left_boundary[-1]
+        parabola_param_np = parabola_param_np[keep_index]
+        classes_param = classes_param[keep_index]
+    if not right_boundary is None:
+        keep_index = parabola_param_np[:,-1] <= right_boundary[-1]
+        parabola_param_np = parabola_param_np[keep_index]
+        classes_param = classes_param[keep_index]
+    # parabola_param_np = parabola_param_np[:,0:3]
+
+    good_parabola, index_param = get_good_parabola(parabola_param_np)
+    if good_parabola is None:
+        print ("errer: bad frame detection !")
+    curve = np.arange(-IMAGE_HEI, 0, 10)
+    for index, parabola in enumerate(parabola_param_np):
+        if index == index_param:
+            if img_debug:
+                y = parabola[0] * curve * curve + parabola[1] * curve + parabola[2]
+                color = (100, 0, 20)
+                cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=10)
+        else:
+            # predict_parabola = parabola[0:3]
+            predict_parabola = get_parabola_by_distance(good_parabola, parabola[-1] - good_parabola[-1])
+            parabola_param_np[index][0:3] = predict_parabola
+            if img_debug:
+                color = (255, 255, 255)
+                y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
+                cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=10)
+
+    if not perspective_img is None:
+        perspective_img = perspective_img.astype(np.float32)
+    print ('get parabola_param_np time: {:.3f}s'.format(time.time() - t))
+    return [parabola_param_np, classes_param]
+
+def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
+    """Visualizes a single binary mask."""
+
+    color = dummy_datasets.get_color_dataset(classs_type)
+    # if not color is None:
+    #     col = color
+    img = img.astype(np.float32)
+
+    line_class = dummy_datasets.get_line_dataset()
+    if classs_type in line_class:
+        perspective_img = perspective_img.astype(np.float32)
+        mask, top_idx = build_curve_objs(curve_objs, mask, classs_type, score)
+        perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
+        perspective_img[top_idx[0], top_idx[1], :] += alpha * col
+
+
+    idx = np.nonzero(mask)
+    img[idx[0], idx[1], :] *= 1.0 - alpha
+    img[idx[0], idx[1], :] += alpha * col
+
+    if show_border:
+        _, contours, _ = cv2.findContours(
+            mask.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        cv2.drawContours(img, contours, -1, _WHITE, border_thick, cv2.LINE_AA)
+
+    return img.astype(np.uint8), perspective_img.astype(np.uint8)
 
 def convert_from_cls_format(cls_boxes, cls_segms, cls_keyps):
     """Convert from the class boxes/segms/keyps format generated by the testing
@@ -208,8 +336,72 @@ def find_curve_objs(curve_objs, mask, classs_type, score):
     if classs_type in line_class:
 
         # mask = cv2.undistort(mask, mtx, dist, None)
+        t_perspective = time.time()
         top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
+        print('loop warpPerspective time: {:.3f}s'.format(time.time() - t_perspective))
+        t_slice = time.time()
+        for i in range(0, IMAGE_HEI, 10):
+            top[i: i + 9] = 0
+        print('loop t_slice time: {:.3f}s'.format(time.time() - t_slice))
+        t_nonzero = time.time()
+        top_idx = np.nonzero(top)
+        print('loop np.nonzero time: {:.3f}s'.format(time.time() - t_nonzero))
+        if len(top_idx[0]) > 100/scale_rate:
+            # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
+            points = np.transpose(top_idx)
+            y_start = points[0][0]
+            x_start = points[0][1]
+            x_end = x_start
+            curve = {"points": [], "start_x_left": x_start, "end_x_right": -IMAGE_WID/2, "start_x_right": -IMAGE_WID/2,
+                     "end_x_left": x_start, "classes": classs_type, "score": score}
+            print ("len(points):" + str(len(points)))
+            t = time.time()
+            for single_point in points:
+                if single_point[0] != y_start:
+                    add_curve_obj(curve, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2])
+                    # add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
+                    y_start = single_point[0]
+                    x_start = single_point[1]
+                    x_end = x_start
+                else:
+                    if single_point[1] - x_end > lane_wid / 4:
+                        # add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
+                        y_start = single_point[0]
+                        x_start = single_point[1]
+                        x_end = x_start
 
+                        curve = {"points": [], "start_x_left": x_start, "end_x_right": -IMAGE_WID/2, "start_x_right": -IMAGE_WID/2,
+                                 "end_x_left": x_start, "classes": classs_type, "score": score}
+                        add_curve_obj(curve, [(x_end + x_start) / 2 - IMAGE_WID / 2, y_start - IMAGE_HEI,
+                                              x_start - IMAGE_WID / 2, x_end - IMAGE_WID / 2])
+
+                    else:
+                        x_end = single_point[1]
+            curve_objs.append(curve)
+            print('loop add2curve time: {:.3f}s'.format(time.time() - t))
+    return mask, top_idx
+
+def add_curve_obj(curve_obj, point):
+    if curve_obj["start_x_left"] > point[2]:
+        curve_obj["start_x_left"] = point[2]
+    if curve_obj["start_x_right"] < point[2]:
+        curve_obj["start_x_right"] = point[2]
+    if curve_obj["end_x_right"] < point[3]:
+        curve_obj["end_x_right"] = point[3]
+    if curve_obj["end_x_left"] > point[3]:
+        curve_obj["end_x_left"] = point[3]
+    curve_obj["points"].append(point)
+
+def build_curve_objs(curve_objs, mask, classs_type, score):
+    line_class = dummy_datasets.get_line_dataset()
+    top_idx = None
+    if classs_type in line_class:
+        # mask = cv2.undistort(mask, mtx, dist, None)
+        top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
+        t_slice = time.time()
+        for i in range(0, IMAGE_HEI, 10):
+            top[i: i + 9] = 0
+        print('loop t_slice time: {:.3f}s'.format(time.time() - t_slice))
         top_idx = np.nonzero(top)
         if len(top_idx[0]) > 100/scale_rate:
             t = time.time()
@@ -218,50 +410,22 @@ def find_curve_objs(curve_objs, mask, classs_type, score):
             y_start = points[0][0]
             x_start = points[0][1]
             x_end = x_start
-            for index in range(0, len(points)):
-                if points[index][0] != y_start:
+            for single_point in points:
+                if single_point[0] != y_start:
                     add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                    y_start = points[index][0]
-                    x_start = points[index][1]
+                    y_start = single_point[0]
+                    x_start = single_point[1]
                     x_end = x_start
                 else:
-                    if points[index][1] - x_end > lane_wid / 4:
+                    if single_point[1] - x_end > lane_wid / 4:
                         add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                        y_start = points[index][0]
-                        x_start = points[index][1]
+                        y_start = single_point[0]
+                        x_start = single_point[1]
                         x_end = x_start
                     else:
-                        x_end = points[index][1]
+                        x_end = single_point[1]
             print('loop add2curve time: {:.3f}s'.format(time.time() - t))
     return mask, top_idx
-
-
-def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
-    """Visualizes a single binary mask."""
-
-    color = dummy_datasets.get_color_dataset(classs_type)
-    if not color is None:
-        col = color
-    img = img.astype(np.float32)
-
-    line_class = dummy_datasets.get_line_dataset()
-    if classs_type in line_class:
-        perspective_img = perspective_img.astype(np.float32)
-        mask, top_idx = find_curve_objs(curve_objs, mask, classs_type, score)
-        perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
-        perspective_img[top_idx[0], top_idx[1], :] += alpha * col
-
-
-    idx = np.nonzero(mask)
-    img[idx[0], idx[1], :] *= 1.0 - alpha
-    img[idx[0], idx[1], :] += alpha * col
-
-    if show_border:
-        _, contours, _ = cv2.findContours(
-            mask.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-        cv2.drawContours(img, contours, -1, _WHITE, border_thick, cv2.LINE_AA)
-
-    return img.astype(np.uint8), perspective_img.astype(np.uint8)
 
 def vis_roi(img,  mask, col):
     """Visualizes the class."""
@@ -303,67 +467,6 @@ def vis_bbox(img, bbox, thick=4):
     cv2.rectangle(img, (x0, y0), (x1, y1), _GREEN, thickness=thick)
     return img
 
-
-def vis_keypoints(img, kps, kp_thresh=2, alpha=0.7):
-    """Visualizes keypoints (adapted from vis_one_image).
-    kps has shape (4, #keypoints) where 4 rows are (x, y, logit, prob).
-    """
-    dataset_keypoints, _ = keypoint_utils.get_keypoints()
-    kp_lines = kp_connections(dataset_keypoints)
-
-    # Convert from plt 0-1 RGBA colors to 0-255 BGR colors for opencv.
-    cmap = plt.get_cmap('rainbow')
-    colors = [cmap(i) for i in np.linspace(0, 1, len(kp_lines) + 2)]
-    colors = [(c[2] * 255, c[1] * 255, c[0] * 255) for c in colors]
-
-    # Perform the drawing on a copy of the image, to allow for blending.
-    kp_mask = np.copy(img)
-
-    # Draw mid shoulder / mid hip first for better visualization.
-    mid_shoulder = (
-        kps[:2, dataset_keypoints.index('right_shoulder')] +
-        kps[:2, dataset_keypoints.index('left_shoulder')]) / 2.0
-    sc_mid_shoulder = np.minimum(
-        kps[2, dataset_keypoints.index('right_shoulder')],
-        kps[2, dataset_keypoints.index('left_shoulder')])
-    mid_hip = (
-        kps[:2, dataset_keypoints.index('right_hip')] +
-        kps[:2, dataset_keypoints.index('left_hip')]) / 2.0
-    sc_mid_hip = np.minimum(
-        kps[2, dataset_keypoints.index('right_hip')],
-        kps[2, dataset_keypoints.index('left_hip')])
-    nose_idx = dataset_keypoints.index('nose')
-    if sc_mid_shoulder > kp_thresh and kps[2, nose_idx] > kp_thresh:
-        cv2.line(
-            kp_mask, tuple(mid_shoulder), tuple(kps[:2, nose_idx]),
-            color=colors[len(kp_lines)], thickness=2, lineType=cv2.LINE_AA)
-    if sc_mid_shoulder > kp_thresh and sc_mid_hip > kp_thresh:
-        cv2.line(
-            kp_mask, tuple(mid_shoulder), tuple(mid_hip),
-            color=colors[len(kp_lines) + 1], thickness=2, lineType=cv2.LINE_AA)
-
-    # Draw the keypoints.
-    for l in range(len(kp_lines)):
-        i1 = kp_lines[l][0]
-        i2 = kp_lines[l][1]
-        p1 = kps[0, i1], kps[1, i1]
-        p2 = kps[0, i2], kps[1, i2]
-        if kps[2, i1] > kp_thresh and kps[2, i2] > kp_thresh:
-            cv2.line(
-                kp_mask, p1, p2,
-                color=colors[l], thickness=2, lineType=cv2.LINE_AA)
-        if kps[2, i1] > kp_thresh:
-            cv2.circle(
-                kp_mask, p1,
-                radius=3, color=colors[l], thickness=-1, lineType=cv2.LINE_AA)
-        if kps[2, i2] > kp_thresh:
-            cv2.circle(
-                kp_mask, p2,
-                radius=3, color=colors[l], thickness=-1, lineType=cv2.LINE_AA)
-
-    # Blend the keypoints.
-    return cv2.addWeighted(img, 1.0 - alpha, kp_mask, alpha, 0)
-
 def undistort_mask(mask, index):
     t = time.time()
     mask = cv2.undistort(mask, mtx, dist, None)
@@ -374,230 +477,6 @@ def undistort_multiprocess(mask, i):
     process = Process(target=undistort_mask, args=(mask, i))
     process.daemon = True
     return process
-
-def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thresh=2,
-        show_box=True, dataset=None, show_class=False, frame_id = 0, img_debug = False):
-
-    """Constructs a numpy array with the detections visualized."""
-
-    if isinstance(boxes, list):
-        boxes, segms, keypoints, classes = convert_from_cls_format(
-            boxes, segms, keypoints)
-    if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
-        return im
-
-    if segms is not None and len(segms) > 0:
-        masks = mask_util.decode(segms)
-        color_list = colormap()
-        mask_color_id = 0
-
-    # perspective
-    masks_list.clear()
-    t = time.time()
-    line_class = dummy_datasets.get_line_dataset()
-    # process_list =[]
-    # line_index = []
-    # for i in range(len(boxes)):
-    #     classs_type = get_class(classes[i], dataset)
-    #     if classs_type in line_class:
-    #         line_index.append(i)
-    #         process_list.append(undistort_multiprocess(masks[..., i], i))
-    # for process in process_list:
-    #     process.start()
-    # for process in process_list:
-    #     process.join()
-    # for i in line_index:
-    #     masks[...,i] = masks_list[str(i)][:]
-    # print ("total undistort time{}".format(time.time() - t) )
-
-    # Display in largest to smallest order to reduce occlusion
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    sorted_inds = np.argsort(-areas)
-
-
-    im = np.array(im)
-    curve_objs = []
-    # del curve_objs[:]
-    mid_im = None
-    perspective_img = None
-    if img_debug:
-        mid_im = np.zeros(im.shape, np.uint8)
-        perspective_img = np.zeros(im.shape, np.uint8)
-
-    t = time.time()
-    for i in sorted_inds:
-        bbox = boxes[i, :4]
-        score = boxes[i, -1]
-        if score < thresh:
-            continue
-        # show box (off by default)
-
-        if show_box and img_debug:
-            im = vis_bbox(
-                im, (bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]))
-
-        class_str = get_class_string(classes[i], score, dataset)
-        # show class (off by default)
-        if show_class and img_debug:
-            im = vis_class(im, (bbox[0], bbox[1] - 2), class_str)
-
-        # show mask
-        if segms is not None and len(segms) > i:
-            color_mask = color_list[mask_color_id % len(color_list), 0:3]
-            mask_color_id += 1
-            type = ' '.join(class_str.split(' ')[:-1])
-            color = dummy_datasets.get_color_dataset(type)
-            if not color is None:
-                color_mask = color
-            if img_debug and (type in line_class):
-                mid_im = vis_roi(mid_im, masks[..., i], dummy_datasets.get_color_dataset(type))
-
-            if img_debug:
-                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type, score)
-            elif type in line_class:
-                t_find_curve = time.time()
-                find_curve_objs(curve_objs, masks[..., i], type, score)
-                print ("find_curve_objs time:{}".format(time.time() - t_find_curve) )
-
-        # show keypoints
-        if img_debug and (keypoints is not None and len(keypoints) > i):
-            im = vis_keypoints(im, keypoints[i], kp_thresh)
-    print ('loop for find_curve_objs time: {:.3f}s'.format(time.time() - t))
-
-    parabola_params = []
-    left_boundary = None
-    right_boundary = None
-    classes_param = []
-
-    t = time.time()
-    print ("len(curve_objs):" + str(len(curve_objs)))
-    for curve_obj in curve_objs:
-        length = len(curve_obj["points"])
-        if length < 100:
-            print ("number of points not much!" + str(length))
-            continue
-        curve = np.array(np.array(curve_obj["points"])[30:length-20, 0:2])
-        # curve = np.array(np.array(curve_obj["points"])[:, 0:2])
-        curve = curve[0: len(curve): 10]
-        curve = curve[curve[:,1].argsort()]
-        # curve = curve - [im.shape[1]/2, 0]
-        # curve = curve - [0, im.shape[0]/2]
-        curve_type = curve_obj["classes"]
-        middle = (curve_obj["end_x_right"] + curve_obj["start_x_left"]) / 2
-        # points = bezier_curve(curve, nTimes=len(curve))
-        if len(curve) < 3:
-            print ("number of points not much!" + str(len(curve)))
-            continue
-        offset_y = max(curve[:,1]) - min(curve[:,1])
-        offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if offset_x > lane_wid/2 and float(offset_y) / offset_x < SLOPE_LIMITED:
-            print ("min(curve[:,1]):" + str(min(curve[:,1])))
-            print ("max(curve[:,1]):" + str(max(curve[:,1])))
-            print ("mask area not good! frame_id:" + str(frame_id))
-            continue
-        parabola_A, parabolaB, parabolaC = optimize.curve_fit(parabola2, curve[:, 1], curve[:, 0])[0]
-        parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
-        parabola_params.append(parabola_param)
-        classes_param.append(curve_type)
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < 0:
-            if (left_boundary is None) or \
-                    ((not left_boundary is None) and left_boundary[-1] < parabola_param[-1]):
-                adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
-                parabola_param[2] += (adjust_x - parabola_param[-1])
-                parabola_param[-1] = adjust_x
-                left_boundary = parabola_param
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > 0:
-            if (right_boundary is None) or \
-                    ((not right_boundary is None) and right_boundary[-1] > parabola_param[-1]):
-                adjust_x = (curve_obj["start_x_right"] + curve_obj["start_x_left"]) / 2
-                parabola_param[2] += (adjust_x - parabola_param[-1])
-                parabola_param[-1] = adjust_x
-                right_boundary = parabola_param
-    parabola_param_np = np.array(parabola_params)
-    classes_param = np.array(classes_param)
-    if not left_boundary is None:
-        keep_index = parabola_param_np[:,-1] >= left_boundary[-1]
-        parabola_param_np = parabola_param_np[keep_index]
-        classes_param = classes_param[keep_index]
-    if not right_boundary is None:
-        keep_index = parabola_param_np[:,-1] <= right_boundary[-1]
-        parabola_param_np = parabola_param_np[keep_index]
-        classes_param = classes_param[keep_index]
-    # parabola_param_np = parabola_param_np[:,0:3]
-
-    good_parabola, index_param = get_good_parabola(parabola_param_np)
-    if good_parabola is None:
-        print ("errer: bad frame detection !")
-    curve = np.arange(-IMAGE_HEI, 0, 10)
-    for index, parabola in enumerate(parabola_param_np):
-        if index == index_param:
-            if img_debug:
-                y = parabola[0] * curve * curve + parabola[1] * curve + parabola[2]
-                color = (100, 0, 20)
-                cv2.polylines(perspective_img, np.int32([np.vstack((y + im.shape[1]/2, curve + im.shape[0])).T]), False, color, thickness=10)
-        else:
-            # predict_parabola = parabola[0:3]
-            predict_parabola = get_parabola_by_distance(good_parabola, parabola[-1] - good_parabola[-1])
-            parabola_param_np[index][0:3] = predict_parabola
-            if img_debug:
-                color = (255, 255, 255)
-                y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
-                cv2.polylines(perspective_img, np.int32([np.vstack((y + im.shape[1]/2, curve + im.shape[0])).T]), False, color, thickness=10)
-
-    if not perspective_img is None:
-        perspective_img = perspective_img.astype(np.float32)
-    print ('get parabola_param_np time: {:.3f}s'.format(time.time() - t))
-    # top_im = vis_perspective(mid_im)
-    return im, mid_im, perspective_img, [parabola_param_np, classes_param]
-
-def vis_one_image_opencv(
-        im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thresh=2,
-        show_box=True, dataset=None, show_class=False):
-    """Constructs a numpy array with the detections visualized."""
-
-    if isinstance(boxes, list):
-        boxes, segms, keypoints, classes = convert_from_cls_format(
-            boxes, segms, keypoints)
-    if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
-        return im
-
-    if segms is not None and len(segms) > 0:
-        masks = mask_util.decode(segms)
-        color_list = colormap()
-        mask_color_id = 0
-
-    # Display in largest to smallest order to reduce occlusion
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    sorted_inds = np.argsort(-areas)
-
-    im = np.array(im)
-
-    for i in sorted_inds:
-        bbox = boxes[i, :4]
-        score = boxes[i, -1]
-        if score < thresh:
-            continue
-        # show box (off by default)
-        if show_box:
-            im = vis_bbox(
-                im, (bbox[0], bbox[1], bbox[2] - bbox[0], bbox[3] - bbox[1]))
-
-        # show class (off by default)
-        if show_class:
-            class_str = get_class_string(classes[i], score, dataset)
-            im = vis_class(im, (bbox[0], bbox[1] - 2), class_str)
-
-        # show mask
-        if segms is not None and len(segms) > i:
-            color_mask = color_list[mask_color_id % len(color_list), 0:3]
-            mask_color_id += 1
-            im = vis_mask(im, masks[..., i], color_mask)
-
-        # show keypoints
-        if keypoints is not None and len(keypoints) > i:
-            im = vis_keypoints(im, keypoints[i], kp_thresh)
-
-    return im
 
 def get_good_parabola(coefficient):
     good_parabola = None
@@ -659,144 +538,3 @@ def get_parabols_by_points(pints):
     B = (x3 * x3 * (y1 - y2) + x2 * x2 * (y3 - y1) + x1 * x1 * (y2 - y3)) / denom
     C = (x2 * x3 * (x2 - x3) * y1 + x3 * x1 * (x3 - x1) * y2 + x1 * x2 * (x1 - x2) * y3) / denom
     return [A, B, C]
-
-def vis_one_image(
-        im, im_name, output_dir, boxes, segms=None, keypoints=None, thresh=0.9,
-        kp_thresh=2, dpi=200, box_alpha=0.0, dataset=None, show_class=False,
-        ext='pdf'):
-    """Visual debugging of detections."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    if isinstance(boxes, list):
-        boxes, segms, keypoints, classes = convert_from_cls_format(
-            boxes, segms, keypoints)
-
-    if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
-        print (im_name + "probability is too low, return.")
-        return
-
-    dataset_keypoints, _ = keypoint_utils.get_keypoints()
-
-    if segms is not None and len(segms) > 0:
-        masks = mask_util.decode(segms)
-
-    color_list = colormap(rgb=True) / 255
-
-    kp_lines = kp_connections(dataset_keypoints)
-    cmap = plt.get_cmap('rainbow')
-    colors = [cmap(i) for i in np.linspace(0, 1, len(kp_lines) + 2)]
-
-    fig = plt.figure(frameon=False)
-    fig.set_size_inches(im.shape[1] / dpi, im.shape[0] / dpi)
-    ax = plt.Axes(fig, [0., 0., 1., 1.])
-    ax.axis('off')
-    fig.add_axes(ax)
-    ax.imshow(im)
-
-    # Display in largest to smallest order to reduce occlusion
-    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-    sorted_inds = np.argsort(-areas)
-
-    mask_color_id = 0
-    for i in sorted_inds:
-        bbox = boxes[i, :4]
-        score = boxes[i, -1]
-        if score < thresh:
-            continue
-
-        # show box (off by default)
-        ax.add_patch(
-            plt.Rectangle((bbox[0], bbox[1]),
-                          bbox[2] - bbox[0],
-                          bbox[3] - bbox[1],
-                          fill=False, edgecolor='r',
-                          linewidth=0.8, alpha=box_alpha))
-
-        if show_class:
-            ax.text(
-                bbox[0], bbox[1] - 2,
-                get_class_string(classes[i], score, dataset),
-                fontsize=3,
-                family='serif',
-                bbox=dict(
-                    facecolor='g', alpha=0.4, pad=0, edgecolor='none'),
-                color='white')
-
-        # show mask
-        if segms is not None and len(segms) > i:
-            img = np.ones(im.shape)
-            color_mask = color_list[mask_color_id % len(color_list), 0:3]
-            mask_color_id += 1
-
-            w_ratio = .4
-            for c in range(3):
-                color_mask[c] = color_mask[c] * (1 - w_ratio) + w_ratio
-            for c in range(3):
-                img[:, :, c] = color_mask[c]
-            e = masks[:, :, i]
-
-            _, contour, hier = cv2.findContours(
-                e.copy(), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-
-            for c in contour:
-                polygon = Polygon(
-                    c.reshape((-1, 2)),
-                    fill=True, facecolor=color_mask,
-                    edgecolor='w', linewidth=1.2,
-                    alpha=0.3)
-                ax.add_patch(polygon)
-
-        # show keypoints
-        if keypoints is not None and len(keypoints) > i:
-            kps = keypoints[i]
-            plt.autoscale(False)
-            for l in range(len(kp_lines)):
-                i1 = kp_lines[l][0]
-                i2 = kp_lines[l][1]
-                if kps[2, i1] > kp_thresh and kps[2, i2] > kp_thresh:
-                    x = [kps[0, i1], kps[0, i2]]
-                    y = [kps[1, i1], kps[1, i2]]
-                    line = plt.plot(x, y)
-                    plt.setp(line, color=colors[l], linewidth=1.0, alpha=0.7)
-                if kps[2, i1] > kp_thresh:
-                    plt.plot(
-                        kps[0, i1], kps[1, i1], '.', color=colors[l],
-                        markersize=3.0, alpha=0.7)
-
-                if kps[2, i2] > kp_thresh:
-                    plt.plot(
-                        kps[0, i2], kps[1, i2], '.', color=colors[l],
-                        markersize=3.0, alpha=0.7)
-
-            # add mid shoulder / mid hip for better visualization
-            mid_shoulder = (
-                kps[:2, dataset_keypoints.index('right_shoulder')] +
-                kps[:2, dataset_keypoints.index('left_shoulder')]) / 2.0
-            sc_mid_shoulder = np.minimum(
-                kps[2, dataset_keypoints.index('right_shoulder')],
-                kps[2, dataset_keypoints.index('left_shoulder')])
-            mid_hip = (
-                kps[:2, dataset_keypoints.index('right_hip')] +
-                kps[:2, dataset_keypoints.index('left_hip')]) / 2.0
-            sc_mid_hip = np.minimum(
-                kps[2, dataset_keypoints.index('right_hip')],
-                kps[2, dataset_keypoints.index('left_hip')])
-            if (sc_mid_shoulder > kp_thresh and
-                    kps[2, dataset_keypoints.index('nose')] > kp_thresh):
-                x = [mid_shoulder[0], kps[0, dataset_keypoints.index('nose')]]
-                y = [mid_shoulder[1], kps[1, dataset_keypoints.index('nose')]]
-                line = plt.plot(x, y)
-                plt.setp(
-                    line, color=colors[len(kp_lines)], linewidth=1.0, alpha=0.7)
-            if sc_mid_shoulder > kp_thresh and sc_mid_hip > kp_thresh:
-                x = [mid_shoulder[0], mid_hip[0]]
-                y = [mid_shoulder[1], mid_hip[1]]
-                line = plt.plot(x, y)
-                plt.setp(
-                    line, color=colors[len(kp_lines) + 1], linewidth=1.0,
-                    alpha=0.7)
-
-    output_name = os.path.basename(im_name) + '.' + ext
-    fig.savefig(os.path.join(output_dir, '{}'.format(output_name)), dpi=dpi)
-    plt.close('all')

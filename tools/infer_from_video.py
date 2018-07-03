@@ -154,9 +154,9 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
             mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
         else:
             mid_im = mid_im[302:451, 0:IMAGE_WID]
-        cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
-        cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
-        cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
+        # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
+        # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
+        # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
 
         cv2.imshow('carlab1', im)
         cv2.imshow('carlab2', mid_im)
@@ -165,6 +165,9 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
 
 def add2MsgQueue(result, frameId, img_debug):
     line_list = []
+    if (result is None) or len(result[0]) == 0:
+        print ("error: len(line_list) == 0")
+        return
 
     for (line_param, line_type) in zip(result[0], result[1]):
         line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
