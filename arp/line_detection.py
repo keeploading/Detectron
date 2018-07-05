@@ -90,7 +90,8 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
         boxes, segms, keypoints, classes = convert_from_cls_format(
             boxes, segms, keypoints)
     if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
-        return im
+        print ("detection not good!")
+        return None
 
     if segms is not None and len(segms) > 0:
         masks = mask_util.decode(segms)

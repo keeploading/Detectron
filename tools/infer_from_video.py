@@ -128,8 +128,8 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = False
-    im, mid_im, top_im, result= detection.get_detection_line(
+    img_debug = True
+    ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
         cls_segms,
@@ -141,6 +141,9 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         frame_id=frameId,
         img_debug = img_debug
     )
+    if ret is None:
+        return
+    im, mid_im, top_im, result = ret
     logger.info('vis_one_image_opencv time: {:.3f}s'.format(time.time() - t))
     add2MsgQueue(result, frameId, img_debug)
 
