@@ -1,5 +1,5 @@
 import numpy as np
-from detectron.utils.vis import lane_wid, get_parabola_by_distance
+from arp.line_detection import lane_wid, get_parabola_by_distance
 #bind with detect spped, later
 SCORE_DEFAULT = 0.2
 LINE_MOVE_WEIGHT = 0.3
