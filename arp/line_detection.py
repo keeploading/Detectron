@@ -59,6 +59,7 @@ SLOPE_LIMITED = IMAGE_HEI/540.#2*LANE_WID
 scale_rate = 1920./IMAGE_WID
 
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
+# source_arr[:,1] = source_arr[:,1] - 604
 source_arr = source_arr / scale_rate
 # source_arr = np.float32([[459. , 420.5],[546. , 420.5],[551.5, 437. ],[451.5, 437. ]])
 lane_wid = 200 / scale_rate
@@ -71,7 +72,7 @@ dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
                         [IMAGE_WID / 2 + offset_x, IMAGE_HEI - 1],
                          [IMAGE_WID / 2 - offset_x, IMAGE_HEI - 1]])
 H = cv2.getPerspectiveTransform(source_arr, dest_arr)
-print ("H:" + str(H))
+print ("source_arr:" + str(source_arr))
 print ("lane_wid:" + str(lane_wid))
 
 dist = np.array([[-0.35262804, 0.15311474, 0.00038879, 0.00048328, - 0.03534825]])
@@ -115,7 +116,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
     perspective_img = None
     if img_debug:
         mid_im = np.zeros(im.shape, np.uint8)
-        perspective_img = np.zeros(im.shape, np.uint8)
+        perspective_img = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
 
     t = time.time()
     for i in sorted_inds:

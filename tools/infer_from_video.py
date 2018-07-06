@@ -56,7 +56,7 @@ import arp.line_detection as detection
 from multiprocessing import Process, Queue
 import json
 from arp.detection_filter import get_predict_list
-from detectron.utils.vis import dist, mtx, IMAGE_WID, IMAGE_HEI
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI
 
 c2_utils.import_detectron_ops()
 
@@ -107,10 +107,10 @@ def parse_args():
     return parser.parse_args()
 
 
+predict_time = []
+process_time = []
 def hanle_frame(args, frameId, im, logger, model, dataset):
-    #out_name = os.path.join(
-    #    args.output_dir, '{}'.format(frameId + '.pdf')
-    #)
+    global predict_time, process_time
     logger.info('Processing frame: {}'.format(frameId))
     timers = defaultdict(Timer)
     t = time.time()
@@ -118,7 +118,9 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         cls_boxes, cls_segms, cls_keyps = infer_engine.im_detect_all(
             model, im, None, timers=timers
         )
+    predict_time.append(time.time() - t)
     logger.info('Inference time: {:.3f}s'.format(time.time() - t))
+    logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
     for k, v in timers.items():
         logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
     if frameId == 1:
@@ -128,7 +130,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = True
+    img_debug = False
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
@@ -144,7 +146,10 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
     if ret is None:
         return
     im, mid_im, top_im, result = ret
-    logger.info('vis_one_image_opencv time: {:.3f}s'.format(time.time() - t))
+    process_time.append(time.time() - t)
+    logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
+
+    logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
     add2MsgQueue(result, frameId, img_debug)
 
 
@@ -152,11 +157,15 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         half_size = (int(im.shape[1]/2), int(im.shape[0]/2))
         if IMAGE_WID > 960:
             im = cv2.resize(im, half_size)
-            top_im = cv2.resize(top_im, half_size)
-            mid_im = mid_im[604:902, 0:IMAGE_WID]
-            mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
+            top_im = cv2.resize(top_im, (960, 604))
+
+            mid_im = cv2.resize(mid_im, half_size)
+            # mid_im = mid_im[604:902, 0:IMAGE_WID]
+            # mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
         else:
-            mid_im = mid_im[302:451, 0:IMAGE_WID]
+            # mid_im = mid_im[302:451, 0:IMAGE_WID]
+            pass
+
         # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
         # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
         # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
@@ -259,6 +268,8 @@ def main(args):
             # img_np = img_np[::2]
             # img_np = img_np[:,::2]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
+            # img_np = img_np[604:902, 0:IMAGE_WID]
+            # img_np = img_np[302:451, 0:IMAGE_WID]
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
             # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
