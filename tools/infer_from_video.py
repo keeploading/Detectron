@@ -22,7 +22,7 @@ python tools/infer_from_video.py \
 --output-dir ./output \
 --image-ext jpg \
 --wts generalized_rcnn/model_final.pkl \
---source ~/data/video3.h264
+--video ~/data/video3.h264
 """
 
 from __future__ import absolute_import
@@ -96,7 +96,7 @@ def parse_args():
         type=str
     )
     parser.add_argument(
-        '--source',
+        '--video',
         help='zmq or /path/to/video/file',
         default=None,
         type=str
@@ -130,7 +130,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = False
+    img_debug = True
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
@@ -218,6 +218,7 @@ def add2MsgQueue(result, frameId, img_debug):
 
 def main(args):
 
+    print ("main:")
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
     cfg.NUM_GPUS = 1
@@ -225,28 +226,28 @@ def main(args):
     assert_and_infer_cfg(cache_urls=False)
     model = infer_engine.initialize_model_from_cfg(args.weights)
     dummy_coco_dataset = dummy_datasets.get_coco_dataset()
-    zmq_video = args.source == "zmq"
+    zmq_video = args.video == "zmq"
     frameId = 0
-
+    print ("args.video:" + str(args.video))
+    socket = None
     if zmq_video:
         context = zmq.Context()
-        socket = context.socket(zmq.REP)
-        socket.bind("tcp://*:7001")
+        socket = context.socket(zmq.REQ)
+        socket.connect("tcp://localhost:6702")
     else:
         # From virtual camera video and its associated timestamp file on Drive PX2,e.g."./lane/videofilepath.h264"
-        cap = cv2.VideoCapture(args.source)
+        cap = cv2.VideoCapture(args.video)
 
     while True:
         if zmq_video:
             try:
+		print ("--------------------send!")
+                socket.send_string('ok')
+		print ("--------------------recv!")
                 message = socket.recv()
                 print("Received message length:" + str(len(message)) + " type:" + str(type(message)))
-                socket.send("ok")
-                position = message.find(ZMQ_SEPER, 0, 100)
-                frameId = message[:position]
-                message = message[position + len(ZMQ_SEPER):]
                 img_np = np.fromstring(message, np.uint8)
-                img_np = img_np.reshape((400, 1400,3))
+                img_np = img_np.reshape((1208, 1920,3))
                 print("nparr type:" + str(type(img_np)) + " shape:" + str(img_np.shape))
                 ret = True
             except KeyboardInterrupt:
@@ -263,13 +264,13 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId % 20 == 0:
+        if frameId % 1 == 0:
             t = time.time()
-            # img_np = img_np[::2]
-            # img_np = img_np[:,::2]
+            img_np = img_np[::2]
+            img_np = img_np[:,::2]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             # img_np = img_np[604:902, 0:IMAGE_WID]
-            # img_np = img_np[302:451, 0:IMAGE_WID]
+            img_np = img_np[302:451, 0:IMAGE_WID]
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
             # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
