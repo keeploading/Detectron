@@ -56,7 +56,7 @@ import arp.line_detection as detection
 from multiprocessing import Process, Queue
 import json
 from arp.detection_filter import get_predict_list
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size
 
 c2_utils.import_detectron_ops()
 
@@ -237,13 +237,12 @@ def main(args):
     else:
         # From virtual camera video and its associated timestamp file on Drive PX2,e.g."./lane/videofilepath.h264"
         cap = cv2.VideoCapture(args.video)
-
     while True:
         if zmq_video:
             try:
-		print ("--------------------send!")
+                print ("--------------------send!")
                 socket.send_string('ok')
-		print ("--------------------recv!")
+                print ("--------------------recv!")
                 message = socket.recv()
                 print("Received message length:" + str(len(message)) + " type:" + str(type(message)))
                 img_np = np.fromstring(message, np.uint8)
@@ -266,11 +265,13 @@ def main(args):
             break
         if frameId % 1 == 0:
             t = time.time()
-            img_np = img_np[::2]
-            img_np = img_np[:,::2]
+            if scale_size:
+                img_np = img_np[::2]
+                img_np = img_np[:,::2]
+                img_np = img_np[302:451, 0:IMAGE_WID]
+            else:
+                img_np = img_np[604:902, 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
-            # img_np = img_np[604:902, 0:IMAGE_WID]
-            img_np = img_np[302:451, 0:IMAGE_WID]
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
             # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 

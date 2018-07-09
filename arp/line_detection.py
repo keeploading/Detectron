@@ -51,15 +51,17 @@ plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
+scale_size = False
 IMAGE_WID = 1920
 IMAGE_HEI = 1208
-# IMAGE_WID = 960
-# IMAGE_HEI = 604
+source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
+source_arr[:,1] = source_arr[:,1] - 604
+if scale_size:
+    IMAGE_WID = 960
+    IMAGE_HEI = 604
 SLOPE_LIMITED = IMAGE_HEI/540.#2*LANE_WID
 scale_rate = 1920./IMAGE_WID
 
-source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
-# source_arr[:,1] = source_arr[:,1] - 604
 source_arr = source_arr / scale_rate
 # source_arr = np.float32([[459. , 420.5],[546. , 420.5],[551.5, 437. ],[451.5, 437. ]])
 lane_wid = 200 / scale_rate
@@ -150,10 +152,10 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
                 im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type, score)
             elif type in line_class:
                 t_find_curve = time.time()
-                build_curve_objs(curve_objs, masks[..., i], type, score)
-                print ("find_curve_objs time:{}".format(time.time() - t_find_curve) )
+                build_curve_objs(curve_objs, masks[..., i], type, score, img_debug)
+                print ("build_curve_objs time:{}".format(time.time() - t_find_curve) )
 
-    print ('loop for find_curve_objs time: {:.3f}s'.format(time.time() - t))
+    print ('loop for build_curve_objs time: {:.3f}s'.format(time.time() - t))
 
     parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug)
     return im, mid_im, perspective_img, parabola_params
@@ -255,7 +257,7 @@ def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, a
     line_class = dummy_datasets.get_line_dataset()
     if classs_type in line_class:
         perspective_img = perspective_img.astype(np.float32)
-        mask, top_idx = build_curve_objs(curve_objs, mask, classs_type, score)
+        mask, top_idx = build_curve_objs(curve_objs, mask, classs_type, score, True)
         perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
         perspective_img[top_idx[0], top_idx[1], :] += alpha * col
 
@@ -331,78 +333,16 @@ def add2curve(curve_objs, point, type, score):
     curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2], "end_x_left":point[3], "classes": type, "score":score}
     curve_objs.append(curve)
 
-def find_curve_objs(curve_objs, mask, classs_type, score):
-
-    line_class = dummy_datasets.get_line_dataset()
-    top_idx = None
-    if classs_type in line_class:
-
-        # mask = cv2.undistort(mask, mtx, dist, None)
-        t_perspective = time.time()
-        top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
-        print('loop warpPerspective time: {:.3f}s'.format(time.time() - t_perspective))
-        t_slice = time.time()
-        for i in range(0, IMAGE_HEI, 10):
-            top[i: i + 9] = 0
-        print('loop t_slice time: {:.3f}s'.format(time.time() - t_slice))
-        t_nonzero = time.time()
-        top_idx = np.nonzero(top)
-        print('loop np.nonzero time: {:.3f}s'.format(time.time() - t_nonzero))
-        if len(top_idx[0]) > 100/scale_rate:
-            # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
-            points = np.transpose(top_idx)
-            y_start = points[0][0]
-            x_start = points[0][1]
-            x_end = x_start
-            curve = {"points": [], "start_x_left": x_start, "end_x_right": -IMAGE_WID/2, "start_x_right": -IMAGE_WID/2,
-                     "end_x_left": x_start, "classes": classs_type, "score": score}
-            print ("len(points):" + str(len(points)))
-            t = time.time()
-            for single_point in points:
-                if single_point[0] != y_start:
-                    add_curve_obj(curve, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2])
-                    # add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                    y_start = single_point[0]
-                    x_start = single_point[1]
-                    x_end = x_start
-                else:
-                    if single_point[1] - x_end > lane_wid / 4:
-                        # add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                        y_start = single_point[0]
-                        x_start = single_point[1]
-                        x_end = x_start
-
-                        curve = {"points": [], "start_x_left": x_start, "end_x_right": -IMAGE_WID/2, "start_x_right": -IMAGE_WID/2,
-                                 "end_x_left": x_start, "classes": classs_type, "score": score}
-                        add_curve_obj(curve, [(x_end + x_start) / 2 - IMAGE_WID / 2, y_start - IMAGE_HEI,
-                                              x_start - IMAGE_WID / 2, x_end - IMAGE_WID / 2])
-
-                    else:
-                        x_end = single_point[1]
-            curve_objs.append(curve)
-            print('loop add2curve time: {:.3f}s'.format(time.time() - t))
-    return mask, top_idx
-
-def add_curve_obj(curve_obj, point):
-    if curve_obj["start_x_left"] > point[2]:
-        curve_obj["start_x_left"] = point[2]
-    if curve_obj["start_x_right"] < point[2]:
-        curve_obj["start_x_right"] = point[2]
-    if curve_obj["end_x_right"] < point[3]:
-        curve_obj["end_x_right"] = point[3]
-    if curve_obj["end_x_left"] > point[3]:
-        curve_obj["end_x_left"] = point[3]
-    curve_obj["points"].append(point)
-
-def build_curve_objs(curve_objs, mask, classs_type, score):
+def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
     line_class = dummy_datasets.get_line_dataset()
     top_idx = None
     if classs_type in line_class:
         # mask = cv2.undistort(mask, mtx, dist, None)
         top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
         t_slice = time.time()
-        for i in range(0, IMAGE_HEI, 10):
-            top[i: i + 9] = 0
+        if not img_debug:
+            for i in range(0, IMAGE_HEI, 10):
+                top[i: i + 9] = 0
         print('loop t_slice time: {:.3f}s'.format(time.time() - t_slice))
         top_idx = np.nonzero(top)
         if len(top_idx[0]) > 100/scale_rate:
