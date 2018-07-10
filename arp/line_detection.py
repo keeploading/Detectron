@@ -52,10 +52,16 @@ _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
 scale_size = False
+is_px2 = True
+
 IMAGE_WID = 1920
 IMAGE_HEI = 1208
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
 source_arr[:,1] = source_arr[:,1] - 604
+if is_px2:
+    print ("is_px2 is ")
+    source_arr = np.float32([[907, 783],[1085,783],[1098,817],[892,817]])
+    source_arr[:,1] = source_arr[:,1] - 554
 if scale_size:
     IMAGE_WID = 960
     IMAGE_HEI = 604
@@ -225,6 +231,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
     good_parabola, index_param = get_good_parabola(parabola_param_np)
     if good_parabola is None:
         print ("errer: bad frame detection !")
+        return
     curve = np.arange(-IMAGE_HEI, 0, 10)
     for index, parabola in enumerate(parabola_param_np):
         if index == index_param:
@@ -235,6 +242,8 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         else:
             # predict_parabola = parabola[0:3]
             predict_parabola = get_parabola_by_distance(good_parabola, parabola[-1] - good_parabola[-1])
+            if predict_parabola is None:
+                continue
             parabola_param_np[index][0:3] = predict_parabola
             if img_debug:
                 color = (255, 255, 255)

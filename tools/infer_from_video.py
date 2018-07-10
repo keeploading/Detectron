@@ -56,7 +56,7 @@ import arp.line_detection as detection
 from multiprocessing import Process, Queue
 import json
 from arp.detection_filter import get_predict_list
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2
 
 c2_utils.import_detectron_ops()
 
@@ -246,6 +246,8 @@ def main(args):
                 message = socket.recv()
                 print("Received message length:" + str(len(message)) + " type:" + str(type(message)))
                 img_np = np.fromstring(message, np.uint8)
+                #if len(img_np) == 0:
+                #    continue
                 img_np = img_np.reshape((1208, 1920,3))
                 print("nparr type:" + str(type(img_np)) + " shape:" + str(img_np.shape))
                 ret = True
@@ -265,12 +267,19 @@ def main(args):
             break
         if frameId % 1 == 0:
             t = time.time()
+            #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
             if scale_size:
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
-                img_np = img_np[302:451, 0:IMAGE_WID]
+                if is_px2:
+                    img_np = img_np[277:426, 0:IMAGE_WID]
+                else:
+                    img_np = img_np[302:451, 0:IMAGE_WID]
             else:
-                img_np = img_np[604:902, 0:IMAGE_WID]
+                if is_px2:
+                    img_np = img_np[554:852, 0:IMAGE_WID]
+                else:
+                    img_np = img_np[604:902, 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
             # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
