@@ -51,15 +51,15 @@ plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
-scale_size = False
-is_px2 = True
+scale_size = True
+is_px2 = False
 
 IMAGE_WID = 1920
 IMAGE_HEI = 1208
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
 source_arr[:,1] = source_arr[:,1] - 604
 if is_px2:
-    print ("is_px2 is ")
+    print ("is_px2 is true")
     source_arr = np.float32([[907, 783],[1085,783],[1098,817],[892,817]])
     source_arr[:,1] = source_arr[:,1] - 554
 if scale_size:
@@ -170,6 +170,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
     if len(curve_objs) == 0:
         return
     parabola_params = []
+    parabola_box = []
     left_boundary = None
     right_boundary = None
     classes_param = []
@@ -201,6 +202,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
         parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
         parabola_params.append(parabola_param)
+        parabola_box.append([curve_obj["start_x_left"], min_y, curve_obj["end_x_right"], max_y])
         classes_param.append(curve_type)
         if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < 0:
             if (left_boundary is None) or \
@@ -218,17 +220,20 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
                 right_boundary = parabola_param
     parabola_param_np = np.array(parabola_params)
     classes_param = np.array(classes_param)
+    parabola_box = np.array(parabola_box)
     if not left_boundary is None:
         keep_index = parabola_param_np[:,-1] >= left_boundary[-1]
         parabola_param_np = parabola_param_np[keep_index]
         classes_param = classes_param[keep_index]
+        parabola_box = parabola_box[keep_index]
     if not right_boundary is None:
         keep_index = parabola_param_np[:,-1] <= right_boundary[-1]
         parabola_param_np = parabola_param_np[keep_index]
         classes_param = classes_param[keep_index]
+        parabola_box = parabola_box[keep_index]
     # parabola_param_np = parabola_param_np[:,0:3]
 
-    good_parabola, index_param = get_good_parabola(parabola_param_np)
+    good_parabola, index_param = get_good_parabola(parabola_param_np, parabola_box)
     if good_parabola is None:
         print ("errer: bad frame detection !")
         return
@@ -429,18 +434,25 @@ def undistort_multiprocess(mask, i):
     process.daemon = True
     return process
 
-def get_good_parabola(coefficient):
+def get_good_parabola(coefficient, parabola_box):
     good_parabola = None
     good_index = 0
     min_gradient = 1
-    for index, param in enumerate(coefficient):
+    good_box = []
+    for box_index, box in enumerate(parabola_box):
+        hei = box[3] - box[1]
+        if hei > IMAGE_HEI / 2 and hei / (box[2] - box[0]) > 15:#600/40
+            good_box.append(box_index)
+    if len(good_box) == 0:
+        good_box = range(len(coefficient))
+    for index in good_box:
+        param = coefficient[index]
         # point1 = get_parabola_y(param, 0)
         # point2 = get_parabola_y(param, -IMAGE_HEI)
         # point3 = get_parabola_y(param, -param[1]/(2*param[0]))
         # point3 = get_parabola_y(param, -IMAGE_HEI/2)
         # points = [point1, point2, point3]
         # dis = max(points) - min(points)
-
         gradient1 = get_gradient(param, -IMAGE_HEI)
         gradient2 = get_gradient(param, 0)
         gradient_dalta = abs(gradient1 - gradient2)
@@ -449,8 +461,6 @@ def get_good_parabola(coefficient):
             min_gradient = gradient_dalta
             good_parabola = param
             good_index = index
-
-
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):

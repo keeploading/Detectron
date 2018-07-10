@@ -50,9 +50,8 @@ def get_predict_list(line_list, frameId):
                     no_nest[-1] = value
         else:
             no_nest.append(value)
-
-
     line_list = no_nest
+
     if len(cache_list) == 0:
         cache_list = line_list
     else:
@@ -81,8 +80,7 @@ def get_predict_list(line_list, frameId):
         for id in range(len(cache_list)):
             if not id in match_id_array:
                 cache_list[id]['score'] = LINE_SCORE_WEIGHT * cache_list[id]['score'] + (1 - LINE_SCORE_WEIGHT) * (SCORE_DEFAULT /2)
-                if frameId == 4840:
-                    pass
+
                 for index in range(len(cache_list)):
                     if (id + index) in match_id_array:
                         cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id + index]['curve_param'],
@@ -99,21 +97,18 @@ def get_predict_list(line_list, frameId):
 
     cache_list = sorted(cache_list, key=lambda k: k['x'])
     cache_list = np.array(cache_list)
-    # cache_list = cache_list[cache_list[:]['score'] > 0.1]
-    filter_list = []
 
     #filter by prob trigger
+    filter_list = []
     for line in cache_list:
         if line['score'] > 0.11:
             filter_list.append(line)
+    cache_list = filter_list
 
-
-
+    #log
     score_list = []
     x_list = []
     type_list = []
-
-    cache_list = filter_list
     #merge prob by close line
     filter_pos = []
     for line in cache_list:
@@ -142,7 +137,7 @@ def get_predict_list(line_list, frameId):
     distance_log = []
     pre_line = None
     for line in cache_list:
-        if line['score'] > 0.7:
+        if line['score'] > 0.6:
             filter_pro.append(line)
             if not pre_line is None:
                 distance_log.append(int(line['x'] - pre_line['x']))
