@@ -52,6 +52,7 @@ def get_predict_list(line_list, frameId):
             no_nest.append(value)
     line_list = no_nest
 
+    #find match line and update score
     if len(cache_list) == 0:
         cache_list = line_list
     else:

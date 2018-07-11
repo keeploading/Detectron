@@ -182,7 +182,8 @@ def add2MsgQueue(result, frameId, img_debug):
         return
 
     for (line_param, line_type) in zip(result[0], result[1]):
-        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
+        # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
+        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2]}
         line_list.append(line_info)
     line_list, cache_list = get_predict_list(line_list, frameId)
     if img_debug and (not line_list is None) and (not cache_list is None) :

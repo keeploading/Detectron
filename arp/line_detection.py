@@ -51,7 +51,7 @@ plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
-scale_size = True
+scale_size = False
 is_px2 = False
 
 IMAGE_WID = 1920
@@ -65,12 +65,13 @@ if is_px2:
 if scale_size:
     IMAGE_WID = 960
     IMAGE_HEI = 604
-SLOPE_LIMITED = IMAGE_HEI/540.#2*LANE_WID
 scale_rate = 1920./IMAGE_WID
 
 source_arr = source_arr / scale_rate
 # source_arr = np.float32([[459. , 420.5],[546. , 420.5],[551.5, 437. ],[451.5, 437. ]])
 lane_wid = 200 / scale_rate
+BOX_SLOPE_LIMITED = IMAGE_HEI/(2. * lane_wid)#2*LANE_WID
+PARABORA_SLOPE_LIMITED = 600./40
 scale_h = 0.025
 scale_w = 0.28
 offset_x = lane_wid * scale_w / 2
@@ -193,11 +194,10 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         min_y = min(curve[:,1])
         offset_y = max_y - min_y
         offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if offset_x > lane_wid/2 and float(offset_y) / offset_x < SLOPE_LIMITED:
-            print ("min_y:" + str(min_y))
-            print ("max_y:" + str(max_y))
-            print ("min_x:" + str(curve_obj["start_x_left"]))
-            print ("max_x:" + str(curve_obj["end_x_right"]))
+        if offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
+            print ("offset_y:" + str(offset_y) + " offset_x:" + str(offset_x))
+            print ("min_y:" + str(min_y) + " max_y:" + str(max_y))
+            print ("min_x:" + str(curve_obj["start_x_left"]) + " max_x:" + str(curve_obj["end_x_right"]))
             continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
         parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
@@ -208,7 +208,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
             if (left_boundary is None) or \
                     ((not left_boundary is None) and left_boundary[-1] < parabola_param[-1]):
                 adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
-                parabola_param[2] += (adjust_x - parabola_param[-1])
+                parabola_param[2] += (adjust_x - parabola_param[-1]) #boundary left edge
                 parabola_param[-1] = adjust_x
                 left_boundary = parabola_param
         if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > 0:
@@ -233,10 +233,11 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         parabola_box = parabola_box[keep_index]
     # parabola_param_np = parabola_param_np[:,0:3]
 
-    good_parabola, index_param = get_good_parabola(parabola_param_np, parabola_box)
-    if good_parabola is None:
-        print ("errer: bad frame detection !")
+    ret = get_good_parabola(parabola_param_np, parabola_box)
+    if ret is None:
+        print ("errer: bad frame detection, didn't find good parabola!")
         return
+    good_parabola, index_param = ret
     curve = np.arange(-IMAGE_HEI, 0, 10)
     for index, parabola in enumerate(parabola_param_np):
         if index == index_param:
@@ -455,12 +456,16 @@ def get_good_parabola(coefficient, parabola_box):
         # dis = max(points) - min(points)
         gradient1 = get_gradient(param, -IMAGE_HEI)
         gradient2 = get_gradient(param, 0)
+        if abs(gradient2) > (1./PARABORA_SLOPE_LIMITED):
+            continue
         gradient_dalta = abs(gradient1 - gradient2)
 
         if gradient_dalta < min_gradient:
             min_gradient = gradient_dalta
             good_parabola = param
             good_index = index
+    if min_gradient == 1:
+        return None
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):
