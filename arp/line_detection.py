@@ -485,18 +485,11 @@ def get_parabola_by_distance(coefficient, distance):
     source_p1 = [x_array[0], A * x_array[0] * x_array[0] + B * x_array[0] + C]
     source_p2 = [x_array[1], A * x_array[1] * x_array[1] + B * x_array[1] + C]
 
-    if A > 0:
-        theta = math.atan2(2*A*source_p1[0] + B, 1)
-        point2 = [source_p1[0] - math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
+    theta = math.atan2(2*A*source_p1[0] + B, 1)
+    point2 = [source_p1[0] - math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
 
-        theta = math.atan2(2*A*source_p2[0] + B, 1)
-        point3 = [source_p2[0] - math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
-    else:
-        theta = math.atan2(2*A*source_p1[0] + B, 1)
-        point2 = [source_p1[0] + math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
-
-        theta = math.atan2(2*A*source_p2[0] + B, 1)
-        point3 = [source_p2[0] + math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
+    theta = math.atan2(2*A*source_p2[0] + B, 1)
+    point3 = [source_p2[0] - math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
     return get_parabols_by_points([point1, point2, point3])
 
 
