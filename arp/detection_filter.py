@@ -23,6 +23,7 @@ def get_predict_list(line_list, frameId):
         for line in line_list[1:]:
             if line['x'] - line_list[0]['x'] < WID_LANE / 2:
                 filter_list[0]['x'] = line['x']
+                filter_list[0]['curve_param'][-1] = line['x']
             else:
                 filter_list.append(line)
         line_list = filter_list
@@ -32,6 +33,7 @@ def get_predict_list(line_list, frameId):
         for line in line_list[0:-1][::-1]:
             if line_list[-1]['x'] - line['x'] < WID_LANE / 2:
                 filter_list[-1]['x'] = line['x']
+                filter_list[-1]['curve_param'][-1] = line['x']
             else:
                 filter_list.append(line)
         line_list = filter_list
@@ -52,6 +54,9 @@ def get_predict_list(line_list, frameId):
             no_nest.append(value)
     line_list = no_nest
 
+    #for debug
+    if frameId == 2770:
+        pass
     #find match line and update score
     if len(cache_list) == 0:
         cache_list = line_list
@@ -73,7 +78,7 @@ def get_predict_list(line_list, frameId):
                 for move_id in move_cache:
                     cache_list[move_id]['x'] = LINE_MOVE_WEIGHT * cache_list[move_id]['x'] + (1 - LINE_MOVE_WEIGHT) * line['x']
                     cache_list[move_id]['score'] = LINE_SCORE_WEIGHT * cache_list[move_id]['score'] + (1 - LINE_SCORE_WEIGHT) * line['score']
-                    cache_list[move_id]['curve_param'][2] = LINE_MOVE_WEIGHT * cache_list[move_id]['curve_param'][2] + (1 - LINE_SCORE_WEIGHT) * line['curve_param'][2]
+                    cache_list[move_id]['curve_param'][2] = LINE_MOVE_WEIGHT * cache_list[move_id]['curve_param'][2] + (1 - LINE_MOVE_WEIGHT) * line['curve_param'][2]
                     cache_list[move_id]['curve_param'][0:2] = line['curve_param'][0:2]
             else:
                 line['score'] = SCORE_DEFAULT
@@ -87,11 +92,13 @@ def get_predict_list(line_list, frameId):
                         cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id + index]['curve_param'],
                                                                                  cache_list[id]['x'] -
                                                                                  cache_list[id + index]['x'])
+                        cache_list[id]['x'] = cache_list[id]['curve_param'][2]
                         break
                     elif (id - index) in match_id_array:
                         cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id - index]['curve_param'],
                                                                                  cache_list[id]['x'] -
                                                                                  cache_list[id - index]['x'])
+                        cache_list[id]['x'] = cache_list[id]['curve_param'][2]
                         break
 
         cache_list.extend(add_line)
@@ -117,7 +124,9 @@ def get_predict_list(line_list, frameId):
             if abs(line['x'] - filter_pos[-1]['x']) < WID_LANE / 4:
                 filter_pos[-1]['type'] = line['type'] if line['score'] > filter_pos[-1]['score'] else filter_pos[-1]['type']
                 percent = line['score'] / (line['score'] + filter_pos[-1]['score'])
-                filter_pos[-1]['x'] = line['x'] * percent + filter_pos[-1]['x']*(1-percent)
+                adjust_x = line['x'] * percent + filter_pos[-1]['x']*(1-percent)
+                filter_pos[-1]['x'] = adjust_x
+                filter_pos[-1]['curve_param'][2] = adjust_x
                 score = line['score'] + filter_pos[-1]['score']
                 filter_pos[-1]['score'] = score if score < LINE_SCORE_WEIGHT else LINE_SCORE_WEIGHT
             else:
@@ -144,4 +153,7 @@ def get_predict_list(line_list, frameId):
                 distance_log.append(int(line['x'] - pre_line['x']))
             pre_line = line
     print ("distance_log:" + str(distance_log))
+    for l in cache_list:
+        if abs(l['curve_param'][2] - l['x']) > 1:
+            print ("please check frame :" + str(frameId))
     return filter_pro, cache_list
