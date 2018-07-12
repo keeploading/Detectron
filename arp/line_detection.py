@@ -51,7 +51,7 @@ plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
-scale_size = False
+scale_size = True
 is_px2 = False
 
 IMAGE_WID = 1920
@@ -481,14 +481,22 @@ def get_parabola_by_distance(coefficient, distance):
 
     point1 = [-B/(2*A), (4*A*C - B*B)/(4*A) + distance]
 
-    x_array = [100, 200]
+    x_array = [-B/(2*A) + 100, -B/(2*A) + 200]
     source_p1 = [x_array[0], A * x_array[0] * x_array[0] + B * x_array[0] + C]
-    theta = math.atan2(2*A*source_p1[0] + B, 1)
-    point2 = [source_p1[0] + math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
-
     source_p2 = [x_array[1], A * x_array[1] * x_array[1] + B * x_array[1] + C]
-    theta = math.atan2(2*A*source_p2[0] + B, 1)
-    point3 = [source_p2[0] + math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
+
+    if A > 0:
+        theta = math.atan2(2*A*source_p1[0] + B, 1)
+        point2 = [source_p1[0] - math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
+
+        theta = math.atan2(2*A*source_p2[0] + B, 1)
+        point3 = [source_p2[0] - math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
+    else:
+        theta = math.atan2(2*A*source_p1[0] + B, 1)
+        point2 = [source_p1[0] + math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
+
+        theta = math.atan2(2*A*source_p2[0] + B, 1)
+        point3 = [source_p2[0] + math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
     return get_parabols_by_points([point1, point2, point3])
 
 

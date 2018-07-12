@@ -130,7 +130,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = True
+    img_debug = False
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
