@@ -81,12 +81,14 @@ dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
                         [IMAGE_WID / 2 + offset_x, IMAGE_HEI - 1],
                          [IMAGE_WID / 2 - offset_x, IMAGE_HEI - 1]])
 H = cv2.getPerspectiveTransform(source_arr, dest_arr)
+H_OP = cv2.getPerspectiveTransform(dest_arr, source_arr)
 print ("source_arr:" + str(source_arr))
 print ("lane_wid:" + str(lane_wid))
 
 dist = np.array([[-0.35262804, 0.15311474, 0.00038879, 0.00048328, - 0.03534825]])
 mtx = np.array([[980.76745978, 0., 969.74796847], [0., 984.13242608, 666.25746185], [0., 0., 1.]])
 CURVETURE_MAX = 50.0/(IMAGE_HEI*IMAGE_HEI)
+
 manager = Manager()
 masks_list = manager.dict()
 
@@ -200,7 +202,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
             print ("min_x:" + str(curve_obj["start_x_left"]) + " max_x:" + str(curve_obj["end_x_right"]))
             continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
-        parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], middle]#, curve_obj["classes"]
+        parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], curve_obj["mileage"]/length, middle]#, curve_obj["classes"]
         parabola_params.append(parabola_param)
         parabola_box.append([curve_obj["start_x_left"], min_y, curve_obj["end_x_right"], max_y])
         classes_param.append(curve_type)
@@ -332,6 +334,7 @@ def add2curve(curve_objs, point, type, score):
             distance = abs(obj["points"][0][0] - point[0])
         if obj["classes"] == type and distance < 50:
             obj["points"].append(point)
+            obj["mileage"] += (point[3] - point[2])
             if obj["start_x_left"] > point[2]:
                 obj["start_x_left"] = point[2]
             if obj["start_x_right"] < point[2]:
@@ -345,7 +348,8 @@ def add2curve(curve_objs, point, type, score):
             matched = True
     if matched:
         return
-    curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2], "end_x_left":point[3], "classes": type, "score":score}
+    curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2],
+             "end_x_left":point[3], "classes": type, "score":score, "mileage": point[3] - point[2]}
     curve_objs.append(curve)
 
 def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
@@ -442,30 +446,64 @@ def get_good_parabola(coefficient, parabola_box):
     good_box = []
     for box_index, box in enumerate(parabola_box):
         hei = box[3] - box[1]
-        if hei > IMAGE_HEI / 2 and hei / (box[2] - box[0]) > 15:#600/40
+        if hei > IMAGE_HEI / 2 and hei / (box[2] - box[0]) > 10:#600/60
             good_box.append(box_index)
-    if len(good_box) == 0:
+    if len(good_box) > 0:
+        filter_coeffi = coefficient[good_box]
+        avg_wid = filter_coeffi[:,4].tolist()
+        good_index = avg_wid.index(np.min(avg_wid))
+        good_index = good_box[good_index]
+    else:
         good_box = range(len(coefficient))
-    for index in good_box:
-        param = coefficient[index]
-        # point1 = get_parabola_y(param, 0)
-        # point2 = get_parabola_y(param, -IMAGE_HEI)
-        # point3 = get_parabola_y(param, -param[1]/(2*param[0]))
-        # point3 = get_parabola_y(param, -IMAGE_HEI/2)
-        # points = [point1, point2, point3]
-        # dis = max(points) - min(points)
-        gradient1 = get_gradient(param, -IMAGE_HEI)
-        gradient2 = get_gradient(param, 0)
-        if abs(gradient2) > (1./PARABORA_SLOPE_LIMITED):
-            continue
-        gradient_dalta = abs(gradient1 - gradient2)
+        for index in good_box:
+            param = coefficient[index]
+            # point1 = get_parabola_y(param, 0)
+            # point2 = get_parabola_y(param, -IMAGE_HEI)
+            # point3 = get_parabola_y(param, -param[1]/(2*param[0]))
+            # point3 = get_parabola_y(param, -IMAGE_HEI/2)
+            # points = [point1, point2, point3]
+            # dis = max(points) - min(points)
+            gradient1 = get_gradient(param, -IMAGE_HEI)
+            gradient2 = get_gradient(param, 0)
+            if abs(gradient2) > (1./PARABORA_SLOPE_LIMITED):
+                continue
+            gradient_dalta = abs(gradient1 - gradient2)
 
-        if gradient_dalta < min_gradient:
-            min_gradient = gradient_dalta
-            good_parabola = param
-            good_index = index
-    if min_gradient == 1:
-        return None
+
+
+            if gradient_dalta < min_gradient:
+                min_gradient = gradient_dalta
+                good_index = index
+        if min_gradient == 1:
+            return None
+    # if len(good_box) == 0:
+    #     good_box = range(len(coefficient))
+    # for index in good_box:
+    #     param = coefficient[index]
+    #     # point1 = get_parabola_y(param, 0)
+    #     # point2 = get_parabola_y(param, -IMAGE_HEI)
+    #     # point3 = get_parabola_y(param, -param[1]/(2*param[0]))
+    #     # point3 = get_parabola_y(param, -IMAGE_HEI/2)
+    #     # points = [point1, point2, point3]
+    #     # dis = max(points) - min(points)
+    #     gradient1 = get_gradient(param, -IMAGE_HEI)
+    #     gradient2 = get_gradient(param, 0)
+    #     if abs(gradient2) > (1. / PARABORA_SLOPE_LIMITED):
+    #         continue
+    #     gradient_dalta = abs(gradient1 - gradient2)
+    #
+    #     if gradient_dalta < min_gradient:
+    #         min_gradient = gradient_dalta
+    #         good_index = index
+    # if min_gradient == 1:
+    #     return None
+
+
+    box = parabola_box[good_index]
+    sin_x = (math.pi/2)*((box[3] - box[1])/ IMAGE_HEI) - math.pi/2
+    sin_y = math.sin(sin_x) + 1 #[0,1]
+    good_parabola = coefficient[good_index]
+    good_parabola[0:2] = good_parabola[0:2] * sin_y
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):

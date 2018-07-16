@@ -56,7 +56,9 @@ import arp.line_detection as detection
 from multiprocessing import Process, Queue
 import json
 from arp.detection_filter import get_predict_list
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
+CUT_OFFSET_PX2 = [277, 426]
+CUT_OFFSET_PC = [302, 451]
 
 c2_utils.import_detectron_ops()
 
@@ -109,7 +111,7 @@ def parse_args():
 
 predict_time = []
 process_time = []
-def hanle_frame(args, frameId, im, logger, model, dataset):
+def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
     global predict_time, process_time
     logger.info('Processing frame: {}'.format(frameId))
     timers = defaultdict(Timer)
@@ -130,7 +132,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = False
+    img_debug = True
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
@@ -150,7 +152,7 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
     logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
 
     logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
-    add2MsgQueue(result, frameId, img_debug)
+    line_list = add2MsgQueue(result, frameId, img_debug)
 
 
     if img_debug:
@@ -169,12 +171,56 @@ def hanle_frame(args, frameId, im, logger, model, dataset):
         # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
         # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
         # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
+        # origin_im = np.concatenate((origin_im, np.ones((IMAGE_HEI, IMAGE_WID, 1))), axis=2)
+        if not result is None:
+            # for (line_param, line_type) in zip(result[0], result[1]):
+            #     drawParabola(origin_im, line_param[0:3].tolist(), line_type)
+            line_array = []
+            for line in line_list:
+                line_param = line['curve_param']
+                line_type = line['type']
+                points = drawParabola(origin_im, line_param[0:3], line_type)
+                line_array.append(points)
+            overlay = origin_im.copy()
+            color = [(255,0,0), (0,255,0), (0,0,255),(255,255,0),(0,255,255),(255,0,255)]
+            for index in range(len(line_array)):
+                if index > 0:
+                    left_line = line_array[index - 1]
+                    right_line = line_array[index]
+                    fill_points = np.array([np.append(left_line, right_line[::-1], axis=0)], dtype=np.int32)
+                    print ("fill_points:" + str(fill_points.shape))
+                    print ("color[index - 1]:" + str(color[index - 1]))
+                    cv2.fillPoly(overlay, fill_points, color[index - 1])
+            alpha = 0.2
+            cv2.addWeighted(overlay, alpha, origin_im, 1-alpha, 0, origin_im)
 
-        cv2.imshow('carlab1', im)
-        cv2.imshow('carlab2', mid_im)
-        cv2.imshow('carlab3', top_im)
-        cv2.waitKey(1)
+        # origin_im
+        origin_im = np.append(origin_im, top_im, axis=1)
+        im = np.append(im, mid_im, axis=1)
+        show_img = np.append(origin_im, im, axis=0)
+        cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), show_img)
+        cv2.imshow('carlab1', show_img)
+        # cv2.imshow('carlab3', top_im)
+        # cv2.waitKey(1)
 
+def drawParabola(image, line_param, type):
+    points = []
+    for x in range(-800, 10, 10):
+        points.append([line_param[0] * x**2 + line_param[1] * x + line_param[2], x])
+    points = np.array(points)
+    points[:,0] = points[:,0] + IMAGE_WID/2
+    points[:,1] = points[:,1] + IMAGE_HEI
+    points = cv2.perspectiveTransform(np.array([points], dtype='float32'), np.array(H_OP))
+    if is_px2:
+        offset_y = CUT_OFFSET_PX2[0] if scale_size else 2 * CUT_OFFSET_PX2[0]
+    else:
+        offset_y = CUT_OFFSET_PC[0] if scale_size else 2 * CUT_OFFSET_PC[0]
+    points = points[0]
+    points[:,1] = points[:,1] + offset_y
+    color = (0, 200, 0)
+    print ("drawParabola points:" + str(points))
+    # cv2.polylines(image, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
+    return points
 def add2MsgQueue(result, frameId, img_debug):
     line_list = []
     if (result is None) or len(result[0]) == 0:
@@ -216,6 +262,7 @@ def add2MsgQueue(result, frameId, img_debug):
     if mQueue.full():
         mQueue.get_nowait()
     mQueue.put(json_str)
+    return line_list
 
 def main(args):
 
@@ -266,23 +313,29 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId % 1 == 0:
+        if frameId < 500:
+            continue
+        if frameId % 2 == 0:
             t = time.time()
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
+            origin_im = np.copy(img_np)
             if scale_size:
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
+                origin_im = np.copy(img_np)
                 if is_px2:
-                    img_np = img_np[277:426, 0:IMAGE_WID]
+                    img_np = img_np[CUT_OFFSET_PX2[0]:CUT_OFFSET_PX2[1], 0:IMAGE_WID]
                 else:
-                    img_np = img_np[302:451, 0:IMAGE_WID]
+                    img_np = img_np[CUT_OFFSET_PC[0]:CUT_OFFSET_PC[1], 0:IMAGE_WID]
             else:
+                origin_im = origin_im[::2]
+                origin_im = origin_im[:,::2]
                 if is_px2:
-                    img_np = img_np[554:852, 0:IMAGE_WID]
+                    img_np = img_np[2*CUT_OFFSET_PX2[0]:2*CUT_OFFSET_PX2[1], 0:IMAGE_WID]
                 else:
-                    img_np = img_np[604:902, 0:IMAGE_WID]
+                    img_np = img_np[2*CUT_OFFSET_PC[0]:2*CUT_OFFSET_PC[1], 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
-            hanle_frame(args, frameId, img_np, logger, model, dummy_coco_dataset)
+            hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
             # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
 
