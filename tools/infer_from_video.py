@@ -121,10 +121,10 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
             model, im, None, timers=timers
         )
     predict_time.append(time.time() - t)
-    logger.info('Inference time: {:.3f}s'.format(time.time() - t))
-    logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
-    for k, v in timers.items():
-        logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
+    # logger.info('Inference time: {:.3f}s'.format(time.time() - t))
+    # logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
+    # for k, v in timers.items():
+    #     logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
     if frameId == 1:
         logger.info(
             ' \ Note: inference on the first image will be slower than the '
@@ -149,10 +149,10 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         return
     im, mid_im, top_im, result = ret
     process_time.append(time.time() - t)
-    logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
-
-    logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
-    line_list = add2MsgQueue(result, frameId, img_debug)
+    # logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
+    #
+    # logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
+    line_list, cache_list = add2MsgQueue(result, frameId, img_debug)
 
 
     if img_debug:
@@ -168,10 +168,36 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
             # mid_im = mid_im[302:451, 0:IMAGE_WID]
             pass
 
-        # cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), im)
-        # cv2.imwrite(os.path.join(args.output_dir, "middle_"+ str(frameId) + ".png"), mid_im)
-        # cv2.imwrite(os.path.join(args.output_dir, "top_"+ str(frameId) + ".png"), top_im)
-        # origin_im = np.concatenate((origin_im, np.ones((IMAGE_HEI, IMAGE_WID, 1))), axis=2)
+        if (not line_list is None) and (not cache_list is None):
+            x_pos = []
+            x_pos_11 = []
+            prob_wid = IMAGE_WID
+            if prob_wid > 960:
+                prob_wid = prob_wid / 2
+            for i in range(-int(prob_wid / 2), int(prob_wid / 2), 1):
+                matched_y = 1
+                matched_y_11 = 2
+                for l in line_list:
+                    dis = abs(l['x'] - i)
+                    if dis < 4:
+                        # hei = dis
+                        if l['type'] == "boundary":
+                            matched_y = int(220 * l['score'])
+                        else:
+                            matched_y = int(190 * l['score'] - dis * dis)
+                for l in cache_list:
+                    dis = abs(l['x'] - i)
+                    if dis < 8:
+                        matched_y_11 = int(200 * l['score'] - dis * dis)
+                x_pos.append([i + int(prob_wid / 2), matched_y])
+                x_pos_11.append([i + int(prob_wid / 2), matched_y_11])
+            # h = np.zeros((100, IMAGE_WID, 3))
+            cv2.polylines(origin_im, [np.array(x_pos)], False, (0, 255, 0))
+            cv2.polylines(origin_im, [np.array(x_pos_11)], False, (0, 0, 255))
+            # origin_im = np.flipud(origin_im)
+
+            # cv2.imshow('prob', h)
+            # cv2.waitKey(1)
         if not result is None:
             # for (line_param, line_type) in zip(result[0], result[1]):
             #     drawParabola(origin_im, line_param[0:3].tolist(), line_type)
@@ -183,16 +209,16 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
                 line_array.append(points)
             overlay = origin_im.copy()
             color = [(255,0,0), (0,255,0), (0,0,255),(255,255,0),(0,255,255),(255,0,255)]
-            for index in range(len(line_array)):
-                if index > 0:
-                    left_line = line_array[index - 1]
-                    right_line = line_array[index]
-                    fill_points = np.array([np.append(left_line, right_line[::-1], axis=0)], dtype=np.int32)
-                    print ("fill_points:" + str(fill_points.shape))
-                    print ("color[index - 1]:" + str(color[index - 1]))
-                    cv2.fillPoly(overlay, fill_points, color[index - 1])
-            alpha = 0.2
-            cv2.addWeighted(overlay, alpha, origin_im, 1-alpha, 0, origin_im)
+            # for index in range(len(line_array)):
+            #     if index > 0:
+            #         left_line = line_array[index - 1]
+            #         right_line = line_array[index]
+            #         fill_points = np.array([np.append(left_line, right_line[::-1], axis=0)], dtype=np.int32)
+            #         print ("fill_points:" + str(fill_points.shape))
+            #         print ("color[index - 1]:" + str(color[index - 1]))
+            #         cv2.fillPoly(overlay, fill_points, color[index - 1])
+            # alpha = 0.2
+            # cv2.addWeighted(overlay, alpha, origin_im, 1-alpha, 0, origin_im)
 
         # origin_im
         origin_im = np.append(origin_im, top_im, axis=1)
@@ -201,7 +227,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), show_img)
         cv2.imshow('carlab1', show_img)
         # cv2.imshow('carlab3', top_im)
-        # cv2.waitKey(1)
+        cv2.waitKey(1)
 
 def drawParabola(image, line_param, type):
     points = []
@@ -218,43 +244,21 @@ def drawParabola(image, line_param, type):
     points = points[0]
     points[:,1] = points[:,1] + offset_y
     color = (0, 200, 0)
-    print ("drawParabola points:" + str(points))
-    # cv2.polylines(image, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
+    # print ("drawParabola points:" + str(points))
+    cv2.polylines(image, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
     return points
+
 def add2MsgQueue(result, frameId, img_debug):
     line_list = []
     if (result is None) or len(result[0]) == 0:
         print ("error: len(line_list) == 0")
-        return
+        return line_list, None
 
     for (line_param, line_type) in zip(result[0], result[1]):
         # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
         line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2]}
         line_list.append(line_info)
     line_list, cache_list = get_predict_list(line_list, frameId)
-    if img_debug and (not line_list is None) and (not cache_list is None) :
-        x_pos = []
-        x_pos_11 = []
-        for i in range(-int(IMAGE_WID/2), int(IMAGE_WID/2), 1):
-            matched_y = 5
-            matched_y_11 = 10
-            for l in line_list:
-                if abs(l['x'] - i) < 5:
-                    matched_y = int(100 * l['score'] -5 )
-            for l in cache_list:
-                if abs(l['x'] - i) < 10:
-                    matched_y_11 = int(100 * l['score'])
-            x_pos.append([i + int(IMAGE_WID/2), matched_y])
-            x_pos_11.append([i + int(IMAGE_WID/2), matched_y_11])
-        h = np.zeros((100, IMAGE_WID, 3))
-        cv2.polylines(h, [np.array(x_pos)], False, (0,255,0))
-        cv2.polylines(h, [np.array(x_pos_11)], False, (0,0,255))
-        h = np.flipud(h)
-
-        if IMAGE_WID > 960:
-            h = cv2.resize(h, (int(IMAGE_WID/2), 100))
-        cv2.imshow('prob', h)
-        cv2.waitKey(1)
 
     finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
     print ("finalMessage:" + str(finalMessage))
@@ -262,7 +266,7 @@ def add2MsgQueue(result, frameId, img_debug):
     if mQueue.full():
         mQueue.get_nowait()
     mQueue.put(json_str)
-    return line_list
+    return line_list, cache_list
 
 def main(args):
 
@@ -313,9 +317,9 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        if frameId < 500:
-            continue
-        if frameId % 2 == 0:
+        # if frameId < 500:
+        #     continue
+        if frameId % 5 == 0:
             t = time.time()
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
             origin_im = np.copy(img_np)

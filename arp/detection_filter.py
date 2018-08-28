@@ -12,8 +12,9 @@ cache_list = []
 def get_predict_list(line_list, frameId):
     global cache_list
 
+    #=========================================================================================
     #remove duplicate line
-    # line_list = np.array(line_list)
+    #=========================================================================================
     line_list = sorted(line_list, key=lambda k:k['x'])
     print ("source line_list:" + str(line_list))
 
@@ -39,25 +40,24 @@ def get_predict_list(line_list, frameId):
         line_list = filter_list
 
     line_list = sorted(line_list, key=lambda k:k['x'])
-    no_nest = []
+    no_near = []
     for index, value in enumerate(line_list):
         if index == 0:
-            no_nest.append(value)
+            no_near.append(value)
             continue
-        if value['x'] - no_nest[-1]['x'] < WID_LANE / 4:
-            if len(no_nest) > 1:
-                distance1 = value['x'] - no_nest[-2]['x']
-                distance2 = no_nest[-1]['x'] - no_nest[-2]['x']
+        if value['x'] - no_near[-1]['x'] < WID_LANE / 4:
+            if len(no_near) > 1:
+                distance1 = value['x'] - no_near[-2]['x']
+                distance2 = no_near[-1]['x'] - no_near[-2]['x']
                 if abs(WID_LANE - distance1) < abs(WID_LANE - distance2):
-                    no_nest[-1] = value
+                    no_near[-1] = value
         else:
-            no_nest.append(value)
-    line_list = no_nest
+            no_near.append(value)
+    line_list = no_near
 
-    #for debug
-    if frameId == 2770:
-        pass
+    #=========================================================================================
     #find match line and update score
+    #=========================================================================================
     if len(cache_list) == 0:
         cache_list = line_list
     else:
@@ -80,9 +80,14 @@ def get_predict_list(line_list, frameId):
                     cache_list[move_id]['score'] = LINE_SCORE_WEIGHT * cache_list[move_id]['score'] + (1 - LINE_SCORE_WEIGHT) * line['score']
                     cache_list[move_id]['curve_param'][2] = LINE_MOVE_WEIGHT * cache_list[move_id]['curve_param'][2] + (1 - LINE_MOVE_WEIGHT) * line['curve_param'][2]
                     cache_list[move_id]['curve_param'][0:2] = line['curve_param'][0:2]
+                    if line['score'] > 0.9:
+                        cache_list[move_id]['type'] = line['type']
             else:
                 line['score'] = SCORE_DEFAULT
                 add_line.append(line)
+        #=========================================================================================
+        #param adjust
+        #=========================================================================================
         for id in range(len(cache_list)):
             if not id in match_id_array:
                 cache_list[id]['score'] = LINE_SCORE_WEIGHT * cache_list[id]['score'] + (1 - LINE_SCORE_WEIGHT) * (SCORE_DEFAULT /2)
@@ -106,7 +111,9 @@ def get_predict_list(line_list, frameId):
     cache_list = sorted(cache_list, key=lambda k: k['x'])
     cache_list = np.array(cache_list)
 
+    #=========================================================================================
     #filter by prob trigger
+    #=========================================================================================
     filter_list = []
     for line in cache_list:
         if line['score'] > 0.11:
@@ -117,7 +124,9 @@ def get_predict_list(line_list, frameId):
     score_list = []
     x_list = []
     type_list = []
+    #=========================================================================================
     #merge prob by close line
+    #=========================================================================================
     filter_pos = []
     for line in cache_list:
         if (len(filter_pos) > 0):
@@ -134,25 +143,31 @@ def get_predict_list(line_list, frameId):
         else:
             filter_pos.append(line)
 
-        score_list.append("%.2f" % line['score'])
-        x_list.append("%.2f" % line['x'])
-        type_list.append(line['type'])
-    print ("x_list:" + str(x_list))
-    print ("score_list:" + str(score_list))
-    print ("type_list:" + str(type_list))
+    #     score_list.append("%.2f" % line['score'])
+    #     x_list.append("%.2f" % line['x'])
+    #     type_list.append(line['type'])
+    # print ("x_list:" + str(x_list))
+    # print ("score_list:" + str(score_list))
+    # print ("type_list:" + str(type_list))
 
     cache_list = filter_pos
 
     filter_pro = []
     distance_log = []
+    type_log = []
+    x_log = []
     pre_line = None
     for line in cache_list:
         if line['score'] > 0.6:
             filter_pro.append(line)
+            type_log.append(line['type'])
+            x_log.append(line['x'])
             if not pre_line is None:
                 distance_log.append(int(line['x'] - pre_line['x']))
             pre_line = line
     print ("distance_log:" + str(distance_log))
+    print ("type_log:" + str(type_log))
+    print ("x_log:" + str(x_log))
     for l in cache_list:
         if abs(l['curve_param'][2] - l['x']) > 1:
             print ("please check frame :" + str(frameId))

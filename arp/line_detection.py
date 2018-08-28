@@ -144,7 +144,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
         class_str = get_class_string(classes[i], score, dataset)
         # show class (off by default)
         if show_class and img_debug:
-            im = vis_class(im, (bbox[0], bbox[1] - 2), class_str)
+            im = vis_class(im, (bbox[2], bbox[3] - 2), class_str)
 
         # show mask
         if segms is not None and len(segms) > i:
@@ -196,10 +196,12 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         min_y = min(curve[:,1])
         offset_y = max_y - min_y
         offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
-            print ("offset_y:" + str(offset_y) + " offset_x:" + str(offset_x))
-            print ("min_y:" + str(min_y) + " max_y:" + str(max_y))
-            print ("min_x:" + str(curve_obj["start_x_left"]) + " max_x:" + str(curve_obj["end_x_right"]))
+        if curve_type != "boundary" and offset_y < IMAGE_HEI:
+            pass
+        elif offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
+            # print ("offset_y:" + str(offset_y) + " offset_x:" + str(offset_x))
+            # print ("min_y:" + str(min_y) + " max_y:" + str(max_y))
+            # print ("min_x:" + str(curve_obj["start_x_left"]) + " max_x:" + str(curve_obj["end_x_right"]))
             continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
         parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], curve_obj["mileage"]/length, middle]#, curve_obj["classes"]
@@ -358,14 +360,11 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
     if classs_type in line_class:
         # mask = cv2.undistort(mask, mtx, dist, None)
         top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
-        t_slice = time.time()
-        if not img_debug:
-            for i in range(0, IMAGE_HEI, 10):
-                top[i: i + 9] = 0
-        print('loop t_slice time: {:.3f}s'.format(time.time() - t_slice))
+        # if not img_debug:
+        for i in range(0, IMAGE_HEI, 10):
+            top[i: i + 9] = 0
         top_idx = np.nonzero(top)
-        if len(top_idx[0]) > 100/scale_rate:
-            t = time.time()
+        if len(top_idx[0]) > 20:
             # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
             points = np.transpose(top_idx)
             y_start = points[0][0]
@@ -385,7 +384,6 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
                         x_end = x_start
                     else:
                         x_end = single_point[1]
-            print('loop add2curve time: {:.3f}s'.format(time.time() - t))
     return mask, top_idx
 
 def vis_roi(img,  mask, col):
@@ -411,11 +409,11 @@ def vis_class(img, pos, class_str, font_scale=0.35):
     font = cv2.FONT_HERSHEY_SIMPLEX
     ((txt_w, txt_h), _) = cv2.getTextSize(txt, font, font_scale, 1)
     # Place text background.
-    back_tl = x0, y0 - int(1.3 * txt_h)
-    back_br = x0 + txt_w, y0
+    back_tl = x0 - int(txt_w), y0 - int(1.3 * txt_h)
+    back_br = x0 - int(txt_w) + txt_w, y0
     cv2.rectangle(img, back_tl, back_br, _GREEN, -1)
     # Show text.
-    txt_tl = x0, y0 - int(0.3 * txt_h)
+    txt_tl = x0 - int(txt_w), y0 - int(0.3 * txt_h)
     cv2.putText(img, txt, txt_tl, font, font_scale, _GRAY, lineType=cv2.LINE_AA)
     return img
 
