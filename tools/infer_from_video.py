@@ -146,17 +146,15 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         frame_id=frameId,
         img_debug = img_debug
     )
-    if ret is None:
-        if not show_img is None:
-            cv2.imshow('carlab1', show_img)
-            cv2.waitKey(1)
-        return
     im, mid_im, top_im, result = ret
     process_time.append(time.time() - t)
     # logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
     #
     # logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
-    line_list, cache_list = add2MsgQueue(result, frameId, img_debug)
+    line_list = None
+    cache_list = None
+    if not result is None:
+        line_list, cache_list = add2MsgQueue(result, frameId, img_debug)
 
 
     if img_debug:
