@@ -111,8 +111,9 @@ def parse_args():
 
 predict_time = []
 process_time = []
+show_img = None
 def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
-    global predict_time, process_time
+    global predict_time, process_time, show_img
     logger.info('Processing frame: {}'.format(frameId))
     timers = defaultdict(Timer)
     t = time.time()
@@ -146,6 +147,9 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         img_debug = img_debug
     )
     if ret is None:
+        if not show_img is None:
+            cv2.imshow('carlab1', show_img)
+            cv2.waitKey(1)
         return
     im, mid_im, top_im, result = ret
     process_time.append(time.time() - t)
@@ -226,7 +230,6 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         show_img = np.append(origin_im, im, axis=0)
         cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), show_img)
         cv2.imshow('carlab1', show_img)
-        # cv2.imshow('carlab3', top_im)
         cv2.waitKey(1)
 
 def drawParabola(image, line_param, type):
