@@ -77,7 +77,7 @@ scale_w = 0.28
 offset_x = lane_wid * scale_w / 2
 offset_y = 1 - scale_h
 dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
-                       [IMAGE_WID / 2  + offset_x, IMAGE_HEI * offset_y],
+                  [IMAGE_WID / 2  + offset_x, IMAGE_HEI * offset_y],
                         [IMAGE_WID / 2 + offset_x, IMAGE_HEI - 1],
                          [IMAGE_WID / 2 - offset_x, IMAGE_HEI - 1]])
 H = cv2.getPerspectiveTransform(source_arr, dest_arr)
@@ -255,6 +255,8 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
             if predict_parabola is None:
                 continue
             parabola_param_np[index][0:3] = predict_parabola
+            if parabola_param_np[index][0] == 0:
+                pass
             if img_debug:
                 color = (255, 255, 255)
                 y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
@@ -277,8 +279,10 @@ def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, a
     if classs_type in line_class:
         perspective_img = perspective_img.astype(np.float32)
         mask, top_idx = build_curve_objs(curve_objs, mask, classs_type, score, True)
-        perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
-        perspective_img[top_idx[0], top_idx[1], :] += alpha * col
+        # perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
+        # perspective_img[top_idx[0], top_idx[1], :] += alpha * col
+        perspective_img[top_idx[1], top_idx[0], :] = [255, 255, 255]
+        # perspective_img[top_idx[0], top_idx[1], :] = [255, 255, 255]
 
 
     idx = np.nonzero(mask)
@@ -359,32 +363,83 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
     top_idx = None
     if classs_type in line_class:
         # mask = cv2.undistort(mask, mtx, dist, None)
-        top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
-        # if not img_debug:
-        for i in range(0, IMAGE_HEI, 10):
-            top[i: i + 9] = 0
-        top_idx = np.nonzero(top)
-        if len(top_idx[0]) > 20:
-            # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
-            points = np.transpose(top_idx)
-            y_start = points[0][0]
-            x_start = points[0][1]
+        t = time.time()
+
+    #     top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
+    #     # if not img_debug:
+    #     for i in range(0, IMAGE_HEI, 40):
+    #         top[i: i + 39] = 0
+    #     for i in range(0, IMAGE_WID, 5):
+    #         top[:,i: i + 4] = 0
+    #     top_idx = np.nonzero(top)
+    #     if len(top_idx[0]) > 5:
+    #         # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
+    #         points = np.transpose(top_idx)
+    #         y_start = points[0][0]
+    #         x_start = points[0][1]
+    #         x_end = x_start
+    #         for single_point in points:
+    #             if single_point[0] != y_start:
+    #                 add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
+    #                 y_start = single_point[0]
+    #                 x_start = single_point[1]
+    #                 x_end = x_start
+    #             else:
+    #                 if single_point[1] - x_end > lane_wid / 4:
+    #                     add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
+    #                     y_start = single_point[0]
+    #                     x_start = single_point[1]
+    #                     x_end = x_start
+    #                 else:
+    #                     x_end = single_point[1]
+    # return mask, top_idx
+
+        dalta_list = np.array(range(0, 31))
+        dalta_list[0:10] = 4
+        # dalta_list = dalta_list[::-1]
+        mask_index = 0
+        for i in range(0, 30):
+            if mask_index >= IMAGE_HEI:
+                break
+            mask[mask_index: mask_index + dalta_list[i]] = 0
+            mask_index = mask_index + dalta_list[i] + 1
+        # for i in range(0, IMAGE_WID, 5):
+        #     mask[:,i: i + 4] = 0
+
+        top_idx = np.nonzero(mask)
+        if len(top_idx[0]) < 10 or len(top_idx[1]) < 10:
+            return mask, np.array([top_idx[1], top_idx[0]])
+        points = np.transpose(np.array([top_idx[1], top_idx[0]]))
+        top_idx = cv2.perspectiveTransform(np.array([points], dtype=np.float32), np.array(H))
+
+        top_idx = top_idx[0].astype(np.int32)
+
+        # top_idx = top_idx[::10]
+        top_idx = top_idx[(top_idx[:,0] > 0) & (top_idx[:,0] < IMAGE_WID) & (top_idx[:,1] > 0) & (top_idx[:,1] < IMAGE_HEI)]
+        # print ("top_idx:" + str(top_idx))
+        print('warpPerspective time: {:.3f}s'.format(time.time() - t))
+        t = time.time()
+        if len(top_idx) > 10:
+            y_start = top_idx[0][1]
+            x_start = top_idx[0][0]
             x_end = x_start
-            for single_point in points:
+            for single_point in top_idx:
                 if single_point[0] != y_start:
                     add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                    y_start = single_point[0]
-                    x_start = single_point[1]
+                    y_start = single_point[1]
+                    x_start = single_point[0]
                     x_end = x_start
                 else:
-                    if single_point[1] - x_end > lane_wid / 4:
+                    if single_point[0] - x_end > lane_wid / 4:
                         add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-                        y_start = single_point[0]
-                        x_start = single_point[1]
+                        y_start = single_point[1]
+                        x_start = single_point[0]
                         x_end = x_start
                     else:
-                        x_end = single_point[1]
-    return mask, top_idx
+                        x_end = single_point[0]
+
+        print('loop time: {:.3f}s'.format(time.time() - t))
+    return mask, [top_idx[:, 0], top_idx[:, 1]]
 
 def vis_roi(img,  mask, col):
     """Visualizes the class."""
@@ -515,29 +570,38 @@ def get_parabola_by_distance(coefficient, distance):
     B = coefficient[1]
     C = coefficient[2]
 
-    point1 = [-B/(2*A), (4*A*C - B*B)/(4*A) + distance]
+    if A == 0:
+        theta = math.atan2(B, 1)
+        return [A, B, C + distance / math.sin(theta)]
+    else:
+        point1 = [-B/(2*A), (4*A*C - B*B)/(4*A) + distance]
 
-    x_array = [-B/(2*A) + 100, -B/(2*A) + 200]
-    source_p1 = [x_array[0], A * x_array[0] * x_array[0] + B * x_array[0] + C]
-    source_p2 = [x_array[1], A * x_array[1] * x_array[1] + B * x_array[1] + C]
+        x_array = [-B/(2*A) + 100, -B/(2*A) + 200]
+        source_p1 = [x_array[0], A * x_array[0] * x_array[0] + B * x_array[0] + C]
+        source_p2 = [x_array[1], A * x_array[1] * x_array[1] + B * x_array[1] + C]
 
-    theta = math.atan2(2*A*source_p1[0] + B, 1)
-    point2 = [source_p1[0] - math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
+        theta = math.atan2(2*A*source_p1[0] + B, 1)
+        point2 = [source_p1[0] - math.sin(theta) * distance, source_p1[1] + math.cos(theta) * distance]
 
-    theta = math.atan2(2*A*source_p2[0] + B, 1)
-    point3 = [source_p2[0] - math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
-    return get_parabols_by_points([point1, point2, point3])
+        theta = math.atan2(2*A*source_p2[0] + B, 1)
+        point3 = [source_p2[0] - math.sin(theta) * distance, source_p2[1] + math.cos(theta) * distance]
+        #y=ax+b
+        if (point3[0] * (point2[1] - point1[1]) + point2[0] * (point1[1] - point3[1]) + point1[0] * (point3[1] - point2[1])) == 0:
+            return [0, 0, C + distance]
+        return get_parabols_by_points([point1, point2, point3])
 
 
-def get_parabols_by_points(pints):
-    x1 = pints[0][0]
-    y1 = pints[0][1]
-    x2 = pints[1][0]
-    y2 = pints[1][1]
-    x3 = pints[2][0]
-    y3 = pints[2][1]
+def get_parabols_by_points(points):
+    x1 = points[0][0]
+    y1 = points[0][1]
+    x2 = points[1][0]
+    y2 = points[1][1]
+    x3 = points[2][0]
+    y3 = points[2][1]
     denom = (x1 - x2) * (x1 - x3) * (x2 - x3)
     A = (x3 * (y2 - y1) + x2 * (y1 - y3) + x1 * (y3 - y2)) / denom
     B = (x3 * x3 * (y1 - y2) + x2 * x2 * (y3 - y1) + x1 * x1 * (y2 - y3)) / denom
     C = (x2 * x3 * (x2 - x3) * y1 + x3 * x1 * (x3 - x1) * y2 + x1 * x2 * (x1 - x2) * y3) / denom
+    if C > 960 or C < -960:
+        print ("C > 960 or C < -960, please check:" + str(points))
     return [A, B, C]

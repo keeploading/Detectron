@@ -109,7 +109,7 @@ def main(args):
     dummy_coco_dataset = dummy_datasets.get_coco_dataset()
 
     if os.path.isdir(args.im_or_folder):
-        im_list = glob.iglob(args.im_or_folder + '/*.' + args.image_ext)
+        im_list = glob.glob(args.im_or_folder + '/*.' + args.image_ext)
     else:
         im_list = [args.im_or_folder]
 
@@ -145,7 +145,8 @@ def main(args):
             box_alpha=0.3,
             show_class=True,
             thresh=0.7,
-            kp_thresh=2
+            kp_thresh=2,
+            ext="png"
         )
 
 

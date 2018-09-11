@@ -41,7 +41,7 @@ import numpy as np
 import os
 
 from caffe2.python import workspace
-
+import glob
 from detectron.core.config import assert_and_infer_cfg
 from detectron.core.config import cfg
 from detectron.core.config import merge_cfg_from_file
@@ -94,7 +94,7 @@ def parse_args():
         '--image-ext',
         dest='image_ext',
         help='image file name extension (default: jpg)',
-        default='jpg',
+        default='png',
         type=str
     )
     parser.add_argument(
@@ -133,7 +133,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = True
+    img_debug = False
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
@@ -141,7 +141,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         cls_keyps,
         dataset=dataset,
         show_class=True,
-        thresh=0.7,
+        thresh=0.8,
         kp_thresh=2,
         frame_id=frameId,
         img_debug = img_debug
@@ -153,9 +153,9 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         return
     im, mid_im, top_im, result = ret
     process_time.append(time.time() - t)
-    # logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
+    logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
     #
-    # logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
+    logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
     line_list, cache_list = add2MsgQueue(result, frameId, img_debug)
 
 
@@ -285,13 +285,19 @@ def main(args):
     frameId = 0
     print ("args.video:" + str(args.video))
     socket = None
+    im_list = None
+    ret = None
     if zmq_video:
         context = zmq.Context()
         socket = context.socket(zmq.REQ)
         socket.connect("tcp://localhost:6702")
+    elif os.path.isdir(args.video):
+        im_list = glob.glob(args.video + '/*.' + args.image_ext)
+        im_list.sort()
     else:
         # From virtual camera video and its associated timestamp file on Drive PX2,e.g."./lane/videofilepath.h264"
         cap = cv2.VideoCapture(args.video)
+    im_file_index = 0
     while True:
         if zmq_video:
             try:
@@ -312,6 +318,13 @@ def main(args):
                 context.term()
                 ret = False
                 cap.release()
+        elif os.path.isdir(args.video):
+            if im_file_index >= len(im_list):
+                break
+            img_np = cv2.imread(im_list[im_file_index])
+            im_file_index += 1
+            ret = True
+            frameId += 1
         else:
             ret, img_np = cap.read()
             frameId += 1
@@ -320,8 +333,8 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
-        # if frameId < 500:
-        #     continue
+        if frameId < 0:
+            continue
         if frameId % 5 == 0:
             t = time.time()
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
