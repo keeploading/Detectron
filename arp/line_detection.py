@@ -98,12 +98,19 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
 
     """Constructs a numpy array with the detections visualized."""
 
+    im = np.array(im)
+    mid_im = None
+    perspective_img = None
+    if img_debug:
+        mid_im = np.zeros(im.shape, np.uint8)
+        perspective_img = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
     if isinstance(boxes, list):
         boxes, segms, keypoints, classes = convert_from_cls_format(
             boxes, segms, keypoints)
     if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
         print ("detection not good!")
-        return None
+        #return None
+        return im, mid_im, perspective_img, None
 
     if segms is not None and len(segms) > 0:
         masks = mask_util.decode(segms)
@@ -120,14 +127,8 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
     sorted_inds = np.argsort(-areas)
 
 
-    im = np.array(im)
     curve_objs = []
     # del curve_objs[:]
-    mid_im = None
-    perspective_img = None
-    if img_debug:
-        mid_im = np.zeros(im.shape, np.uint8)
-        perspective_img = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
 
     t = time.time()
     for i in sorted_inds:
