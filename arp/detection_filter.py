@@ -1,22 +1,30 @@
 import numpy as np
+from detectron.utils.logging import setup_logging
 from arp.line_detection import lane_wid, get_parabola_by_distance
 #bind with detect spped, later
 SCORE_DEFAULT = 0.2
-LINE_MOVE_WEIGHT = 0.3
-LINE_SCORE_WEIGHT = 0.9
+LINE_MOVE_WEIGHT = 0.9
+LINE_SCORE_WEIGHT = 0.7
 MAX_CACHE = 50
 WID_LANE = lane_wid
 #[{x, score, type}]
 cache_list = []
-
+logger = setup_logging(__name__)
 def get_predict_list(line_list, frameId):
     global cache_list
-
+    if frameId == 40:
+        pass
     #=========================================================================================
     #remove duplicate line
     #=========================================================================================
     line_list = sorted(line_list, key=lambda k:k['x'])
     print ("source line_list:" + str(line_list))
+
+    x_log = []
+    for line in line_list:
+        if line['score'] > 0.11:
+            x_log.append(int(line['x']))
+    logger.info (str(frameId) + " x_log input:" + str(x_log))
 
     if line_list[0]['type'] == 'boundary':
         # line_list = line_list[line_list[1:]['x'] - line_list[0]['x'] > WID_LANE / 2]
@@ -45,7 +53,7 @@ def get_predict_list(line_list, frameId):
         if index == 0:
             no_near.append(value)
             continue
-        if value['x'] - no_near[-1]['x'] < WID_LANE / 4:
+        if value['x'] - no_near[-1]['x'] < WID_LANE / 3:
             if len(no_near) > 1:
                 distance1 = value['x'] - no_near[-2]['x']
                 distance2 = no_near[-1]['x'] - no_near[-2]['x']
@@ -55,9 +63,20 @@ def get_predict_list(line_list, frameId):
             no_near.append(value)
     line_list = no_near
 
+    x_log = []
+    for line in line_list:
+        if line['score'] > 0.11:
+            x_log.append(str(int(line['x'])) + "(" + str(int(line['middle'])) + ")")
+
+    x_log_cache = []
+    for line in cache_list:
+        if line['score'] > 0.11:
+            x_log_cache.append(str(int(line['x'])) + "(" + str(int(line['middle'])) + ")")
+    logger.info ("x_log_cache:" + str(x_log_cache))
     #=========================================================================================
     #find match line and update score
     #=========================================================================================
+    avg_move_list = []
     if len(cache_list) == 0:
         cache_list = line_list
     else:
@@ -65,10 +84,11 @@ def get_predict_list(line_list, frameId):
         add_line = []
         for line in line_list:
             match_index = -1
-            distance_min = WID_LANE / 4
+            distance_min = WID_LANE / 3
             move_cache = []
             for index, cache_line in enumerate(cache_list):
-                distance = abs(line['x'] - cache_line['x'])
+                #use middle instead of x during diff frame compare
+                distance = abs(line['middle'] - cache_line['middle'])
                 if distance < distance_min:
                     match_index = index
                     move_cache.append(match_index)
@@ -76,34 +96,46 @@ def get_predict_list(line_list, frameId):
             if len(move_cache) > 0:
                 match_id_array.extend(move_cache)
                 for move_id in move_cache:
-                    cache_list[move_id]['x'] = LINE_MOVE_WEIGHT * cache_list[move_id]['x'] + (1 - LINE_MOVE_WEIGHT) * line['x']
-                    cache_list[move_id]['score'] = LINE_SCORE_WEIGHT * cache_list[move_id]['score'] + (1 - LINE_SCORE_WEIGHT) * line['score']
-                    cache_list[move_id]['curve_param'][2] = LINE_MOVE_WEIGHT * cache_list[move_id]['curve_param'][2] + (1 - LINE_MOVE_WEIGHT) * line['curve_param'][2]
+                    print ("x_log" + str(cache_list[move_id]['x']) + " --> " + str(line['x']))
+                    # cache_list[move_id]['x'] += LINE_MOVE_WEIGHT * (line['middle'] - cache_list[move_id]['middle'])
+                    x_change = LINE_MOVE_WEIGHT * (line['x'] - cache_list[move_id]['x'])
+                    avg_move_list.append(x_change)
+                    cache_list[move_id]['x'] += x_change
+                    cache_list[move_id]['middle'] += LINE_MOVE_WEIGHT * (line['middle'] - cache_list[move_id]['middle'])
+                    cache_list[move_id]['score'] = LINE_SCORE_WEIGHT * line['score'] + (1 - LINE_SCORE_WEIGHT) * cache_list[move_id]['score']
+                    # cache_list[move_id]['curve_param'][2] = LINE_MOVE_WEIGHT * line['curve_param'][2] + (1 - LINE_MOVE_WEIGHT) * cache_list[move_id]['curve_param'][2]
+                    cache_list[move_id]['curve_param'][2] = cache_list[move_id]['x']
                     cache_list[move_id]['curve_param'][0:2] = line['curve_param'][0:2]
                     if line['score'] > 0.9:
                         cache_list[move_id]['type'] = line['type']
             else:
                 line['score'] = SCORE_DEFAULT
                 add_line.append(line)
+        print ("x_log add_line:" + str(add_line))
+        avg_move = np.array(avg_move_list).mean()
         #=========================================================================================
         #param adjust
         #=========================================================================================
         for id in range(len(cache_list)):
             if not id in match_id_array:
-                cache_list[id]['score'] = LINE_SCORE_WEIGHT * cache_list[id]['score'] + (1 - LINE_SCORE_WEIGHT) * (SCORE_DEFAULT /2)
+                cache_list[id]['score'] = 0.9 * cache_list[id]['score']#(1 - LINE_SCORE_WEIGHT) * cache_list[id]['score']
 
                 for index in range(len(cache_list)):
                     if (id + index) in match_id_array:
                         cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id + index]['curve_param'],
                                                                                  cache_list[id]['x'] -
-                                                                                 cache_list[id + index]['x'])
-                        cache_list[id]['x'] = cache_list[id]['curve_param'][2]
+                                                                                 cache_list[id + index]['x'] + avg_move)
+                        dalta = cache_list[id]['curve_param'][2] - cache_list[id]['x']
+                        cache_list[id]['x'] += dalta
+                        cache_list[id]['middle'] += dalta
                         break
                     elif (id - index) in match_id_array:
                         cache_list[id]['curve_param'] = get_parabola_by_distance(cache_list[id - index]['curve_param'],
                                                                                  cache_list[id]['x'] -
                                                                                  cache_list[id - index]['x'])
-                        cache_list[id]['x'] = cache_list[id]['curve_param'][2]
+                        dalta = cache_list[id]['curve_param'][2] - cache_list[id]['x']
+                        cache_list[id]['x'] += dalta
+                        cache_list[id]['middle'] += dalta
                         break
 
         cache_list.extend(add_line)
@@ -155,19 +187,21 @@ def get_predict_list(line_list, frameId):
     filter_pro = []
     distance_log = []
     type_log = []
-    x_log = []
+    predict_x_log = []
     pre_line = None
     for line in cache_list:
         if line['score'] > 0.6:
             filter_pro.append(line)
             type_log.append(line['type'])
-            x_log.append(line['x'])
+            predict_x_log.append(str(int(line['x'])))
             if not pre_line is None:
                 distance_log.append(int(line['x'] - pre_line['x']))
             pre_line = line
     print ("distance_log:" + str(distance_log))
     print ("type_log:" + str(type_log))
-    print ("x_log:" + str(x_log))
+
+    x_log = str(x_log)
+    logger.info ("x_log:" + str(x_log) + ((80 - len(x_log)) * " ") + "----> " + str(predict_x_log))
     for l in cache_list:
         if abs(l['curve_param'][2] - l['x']) > 1:
             print ("please check frame :" + str(frameId))

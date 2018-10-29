@@ -50,6 +50,7 @@ import detectron.utils.net as nu
 def train_model():
     """Model training loop."""
     logger = logging.getLogger(__name__)
+    print ("get in train_model fun")
     model, weights_file, start_iter, checkpoints, output_dir = create_model()
     if 'final' in checkpoints:
         # The final model was found in the output directory, so nothing to do
@@ -128,6 +129,7 @@ def create_model():
                 format(weights_file, start_iter)
             )
 
+    print ("get in create_model fun")
     logger.info('Building model: {}'.format(cfg.MODEL.TYPE))
     model = model_builder.create(cfg.MODEL.TYPE, train=True)
     if cfg.MEMONGER:
@@ -152,6 +154,7 @@ def optimize_memory(model):
 
 
 def setup_model_for_training(model, weights_file, output_dir):
+    print ("get in setup_model_for_training fun")
     """Loaded saved weights and create the network in the C2 workspace."""
     logger = logging.getLogger(__name__)
     add_model_training_inputs(model)

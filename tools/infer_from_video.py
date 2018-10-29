@@ -55,6 +55,13 @@ import detectron.utils.vis as vis_utils
 import arp.line_detection as detection
 from multiprocessing import Process, Queue
 import json
+import math
+import copy
+from arp.line_detection import lane_wid
+import arp.const as const
+import arp.messaging as messaging
+from arp.fusion_kalman import Fusion
+from arp.fusion_particle_line import FusionParticle
 from arp.detection_filter import get_predict_list
 from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
 CUT_OFFSET_PX2 = [277, 426]
@@ -65,7 +72,8 @@ c2_utils.import_detectron_ops()
 # OpenCL may be enabled by default in OpenCV3; disable it because it's not
 # thread safe and causes unwanted GPU memory allocations.
 cv2.ocl.setUseOpenCL(False)
-
+g_fusion_filter = None
+g_particle_filter = None
 
 def parse_args():
     parser = argparse.ArgumentParser(description='End-to-end inference')
@@ -133,7 +141,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         )
 
     t = time.time()
-    img_debug = False
+    img_debug = True
     ret = detection.get_detection_line(
         im[:, :, ::-1],
         cls_boxes,
@@ -153,8 +161,9 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
     logger.info('process_time: {:.3f}s'.format(np.mean(np.array(process_time))))
     line_list = None
     cache_list = None
+    particles = None
     if not result is None:
-        line_list, cache_list = add2MsgQueue(result, frameId, img_debug)
+        line_list, cache_list, filter_list, particles = add2MsgQueue(result, frameId, img_debug)
 
 
     if img_debug:
@@ -169,6 +178,8 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         else:
             # mid_im = mid_im[302:451, 0:IMAGE_WID]
             pass
+        if not particles is None:
+            drawParticles(origin_im, particles)
 
         if (not line_list is None) and (not cache_list is None):
             x_pos = []
@@ -207,8 +218,14 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
             for line in line_list:
                 line_param = line['curve_param']
                 line_type = line['type']
-                points = drawParabola(origin_im, line_param[0:3], line_type)
+                points = drawParabola(origin_im, line_param[0:3], line_type, color = (0, 200, 0))
                 line_array.append(points)
+
+            if not filter_list is None:
+                for line in filter_list:
+                    line_param = line['curve_param']
+                    line_type = line['type']
+                    drawParabola(origin_im, line_param[0:3], line_type, color = (200, 0, 0))
             overlay = origin_im.copy()
             color = [(255,0,0), (0,255,0), (0,0,255),(255,255,0),(0,255,255),(255,0,255)]
             # for index in range(len(line_array)):
@@ -230,7 +247,18 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         cv2.imshow('carlab1', show_img)
         cv2.waitKey(1)
 
-def drawParabola(image, line_param, type):
+def drawParticles(image, particles):
+    histogram = np.array([[i, 0] for i in range(500)])
+
+    for index, p in enumerate(particles):
+        if abs(p.x) > 100:
+            continue
+        meter_scale = (3.5/lane_wid)
+        # histogram[index][0] = index + 100#int(p.x) / meter_scale
+        histogram[int(p.x / meter_scale) + 150][1] += 1
+    cv2.polylines(image, np.int32([np.vstack((histogram[:,0] + IMAGE_WID/2 - 150, histogram[:,1])).T]), False, (0, 0, 250), thickness=1)
+
+def drawParabola(image, line_param, type, color):
     points = []
     for x in range(-800, 10, 10):
         points.append([line_param[0] * x**2 + line_param[1] * x + line_param[2], x])
@@ -244,7 +272,6 @@ def drawParabola(image, line_param, type):
         offset_y = CUT_OFFSET_PC[0] if scale_size else 2 * CUT_OFFSET_PC[0]
     points = points[0]
     points[:,1] = points[:,1] + offset_y
-    color = (0, 200, 0)
     # print ("drawParabola points:" + str(points))
     cv2.polylines(image, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
     return points
@@ -257,21 +284,117 @@ def add2MsgQueue(result, frameId, img_debug):
 
     for (line_param, line_type) in zip(result[0], result[1]):
         # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
-        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2]}
+        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2], 'middle':line_param[5]}
         line_list.append(line_info)
     line_list, cache_list = get_predict_list(line_list, frameId)
+    filter_list = None
+    particles = None
+    # filter_list = dr_filter(line_list)
+    # ret = particle_filter(line_list)
+    # if not ret is None:
+    #     filter_list, particles = ret
 
     finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
     print ("finalMessage:" + str(finalMessage))
     json_str = json.dumps(finalMessage)
-    if mQueue.full():
-        mQueue.get_nowait()
-    mQueue.put(json_str)
-    return line_list, cache_list
+    if g_detect_queue.full():
+        g_detect_queue.get_nowait()
+    g_detect_queue.put(json_str)
+    return line_list, cache_list, filter_list, particles
+
+def get_right_parabola(line_list):
+    for index, line in enumerate(line_list):
+        if line["curve_param"][2] > 0:
+            ret = line["curve_param"][:]
+            ret[2] = ret[2] % lane_wid
+            return ret
+    ret = line_list[-1]["curve_param"][:]
+    ret[2] = ret[2] % lane_wid
+    return ret
+
+def particle_filter(line_list):
+    global g_particle_filter
+    if line_list is None or len(line_list) == 0:
+        return None
+    param = get_right_parabola(line_list)
+    meter_scale = (3.5/lane_wid)
+    x = param[2] * meter_scale
+    if g_particle_filter is None or (time.time() - g_particle_filter.timestamp > 1):
+        g_particle_filter = FusionParticle(x, g_dr_queue)
+        g_particle_filter.start()
+        return None
+    t = time.time()
+    # x_estimate, particles = g_particle_filter.update(x)
+    x_estimate, particles = g_particle_filter.update(x, param)
+    dalta_x = (x_estimate - x) / meter_scale
+    print (str(time.time()-t) + "particle filter adjust x:" + str(dalta_x))
+    filter_list = copy.deepcopy(line_list)
+    for line in filter_list:
+        line["curve_param"][2] += dalta_x
+    return filter_list, particles
+
+g_x_log = []
+g_x_pred_log = []
+g_x_est_log = []
+g_x_time = []
+def dr_filter(line_list):
+    if line_list is None or len(line_list) == 0:
+        return None
+    global g_fusion_filter
+    param = get_right_parabola(line_list)
+    meter_scale = (3.5/lane_wid)
+    x = param[2] * meter_scale
+    avg_speed = []
+    avg_angle = []
+    for i in range(10):
+        message = g_dr_queue.get(True)
+        json_item = json.loads(message)
+        avg_speed.append(json_item["speed"])
+        avg_angle.append(json_item["steerAngle"])
+    avg_speed = np.array(avg_speed)
+    debug_angle = avg_angle[0]
+    avg_angle = np.array(avg_angle)
+    avg_speed = np.mean(avg_speed)
+    avg_angle = np.mean(avg_angle)
+    print ("g_dr_queue speed:{} angle:{}->{}".format(avg_speed, debug_angle, avg_angle))
+    v = avg_speed
+    wheel_theta = avg_angle / const.STEER_RATIO
+    wheel_theta = math.radians(wheel_theta)
+    car_theta = np.pi/2 + wheel_theta
+    w = v/(const.WHEEL_BASE/np.sin(wheel_theta))
+    # if car_theta < np.pi / 2:
+    #     w = -w
+    if g_fusion_filter is None or (time.time() - g_fusion_filter.timestamp > 1):
+        g_fusion_filter = Fusion(x, v, w)
+        print ("kalman filter recreate")
+        return None
+
+    t = time.time() - g_fusion_filter.timestamp
+    # pre_estimate = g_fusion_filter.get_estimate()
+    #x, v, w, t, parabola_param
+    if len(g_x_time) == 0:
+        g_x_time.append(t)
+    else:
+        g_x_time.append(t + g_x_time[-1])
+    g_x_log.append(x)
+    estimate_x = g_fusion_filter.update_step(x, v, w, t, param)
+    predict_x = g_fusion_filter.get_predict()
+    g_x_pred_log.append(predict_x)
+    g_x_est_log.append(estimate_x)
+    print("kalman filter: {} + {} --> {} ".format(x, predict_x, estimate_x))
+    if len(g_x_log) % 100 == 0:
+        np.savetxt('kalman_x.txt', g_x_log, newline=',', fmt=str("%s"))
+        np.savetxt('kalman_x_pred.txt', np.array(g_x_pred_log), newline=',', fmt=str("%s"))
+        np.savetxt('kalman_x_est.txt', np.array(g_x_est_log), newline=',', fmt=str("%s"))
+        np.savetxt('kalman_x_time.txt', np.array(g_x_time), newline=',', fmt=str("%s"))
+    dalta_x = (estimate_x - x) / meter_scale
+    print ("kalman filter adjust x:" + str(dalta_x))
+    filter_list = copy.deepcopy(line_list)
+    for line in filter_list:
+        line["curve_param"][2] += dalta_x
+    return filter_list
 
 def main(args):
-
-    print ("main:")
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
     cfg.NUM_GPUS = 1
@@ -288,7 +411,7 @@ def main(args):
     if zmq_video:
         context = zmq.Context()
         socket = context.socket(zmq.REQ)
-        socket.connect("tcp://localhost:6702")
+        socket.connect("tcp://localhost:{}".format(const.PORT_IMAGE_OUT))
     elif os.path.isdir(args.video):
         im_list = glob.glob(args.video + '/*.' + args.image_ext)
         im_list.sort()
@@ -299,14 +422,14 @@ def main(args):
     while True:
         if zmq_video:
             try:
+                socket.send_string('req from detectron')
                 print ("--------------------send!")
-                socket.send_string('ok')
-                print ("--------------------recv!")
                 message = socket.recv()
+                print ("--------------------recv!" + str(time.time()))
                 print("Received message length:" + str(len(message)) + " type:" + str(type(message)))
+                if len(message) < 100:
+                    continue
                 img_np = np.fromstring(message, np.uint8)
-                #if len(img_np) == 0:
-                #    continue
                 img_np = img_np.reshape((1208, 1920,3))
                 print("nparr type:" + str(type(img_np)) + " shape:" + str(img_np.shape))
                 ret = True
@@ -322,19 +445,20 @@ def main(args):
             img_np = cv2.imread(im_list[im_file_index])
             im_file_index += 1
             ret = True
-            frameId += 1
         else:
             ret, img_np = cap.read()
-            frameId += 1
 
+        frameId += 1
         # read completely or raise exception
         if not ret:
             print("cannot get frame")
             break
-        # if frameId < 500:
-        #     continue
-        if frameId % 5 == 0:
+        if frameId < 0:
+            continue
+        if frameId % 1 == 0:
             t = time.time()
+            print("time:" + str(t))
+            time.sleep(0.001)
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
             origin_im = np.copy(img_np)
             if scale_size:
@@ -354,7 +478,7 @@ def main(args):
                     img_np = img_np[2*CUT_OFFSET_PC[0]:2*CUT_OFFSET_PC[1], 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
-            # logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+            logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
 
 def result_sender():
@@ -362,9 +486,9 @@ def result_sender():
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.setsockopt(zmq.SNDTIMEO, 3000)
-    socket.bind("tcp://*:6701")
+    socket.bind("tcp://*:{}".format(const.PORT_DETECTION))
     while(True):
-        message = mQueue.get(True)
+        message = g_detect_queue.get(True)
         if not message is None:
             recv = socket.recv()
             print ("Received request:%s" % recv)
@@ -373,13 +497,36 @@ def result_sender():
             except zmq.ZMQError:
                 time.sleep(1)
 
+def dr_recever():
+    print ("dr recever process start !")
+    sub_context = zmq.Context()
+    socket = sub_context.socket(zmq.SUB)
+    print ("tcp://localhost:{}".format(const.PORT_DR_OUT))
+    socket.connect("tcp://localhost:{}".format(const.PORT_DR_OUT))
+    socket.setsockopt_string(zmq.SUBSCRIBE, "")
+    # socket.setsockopt(zmq.CONFLATE, 1)
+    while(True):
+        try:
+            string = socket.recv()
+            # print ("Received:{}".format(len(string)))
+            if g_dr_queue.full():
+                g_dr_queue.get(True)
+            g_dr_queue.put(string)
+
+        except zmq.ZMQError, Queue.em:
+            time.sleep(1)
+
 
 if __name__ == '__main__':
     workspace.GlobalInit(['caffe2', '--caffe2_log_level=0'])
     setup_logging(__name__)
     args = parse_args()
-    mQueue = Queue(10)
+    # g_fusion_filter = Fusion()
+    g_detect_queue = Queue(2)
+    g_dr_queue = Queue(10)
     p = Process(target=result_sender)
     p.start()
+    # pdr_receiver = Process(target=dr_recever)
+    # pdr_receiver.start()
     main(args)
 

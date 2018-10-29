@@ -60,14 +60,14 @@ def parse_args():
         '--video',
         dest='video',
         help='video file',
-        default='/media/administrator/deeplearning/video/video5.h264',
+        default='/media/administrator/deeplearning/video/video713_2.h264',
         type=str
     )
     parser.add_argument(
         '--subsample',
         dest='subsample',
         help='subsample from frames',
-        default=20,
+        default=10,
         type=str
     )
     parser.add_argument(
@@ -75,7 +75,7 @@ def parse_args():
         dest='output_dir',
         help='directory for visualization pdfs (default: /tmp/infer_simple)',
         # default='/media/administrator/deeplearning/self-labels/leftImg8bit/train/test',
-        default='/media/administrator/deeplearning/self-labels/result-20',
+        default='/media/administrator/deeplearning/self-labels/result1-10',
         type=str
     )
     return parser.parse_args()
@@ -94,6 +94,8 @@ def main(args):
         if not ret:
             print("cannot get frame")
             break
+        if frameId < 0:
+            continue
         frameId += 1
         if frameId % subsample == 0:
             # cv2.imshow('image', img_np)

@@ -2,6 +2,7 @@
 from scipy.misc import comb
 from scipy import optimize
 import numpy as np
+import math
 
 def parabola2(x, A, B, C):
     return A*x*x + B*x + C
@@ -43,3 +44,9 @@ def bezier_curve(points, nTimes=1000):
 
     return np.vstack((xvals, yvals)).T
 
+def distance(x1, y1, x2, y2):
+    return math.sqrt((x1 - x2) **2 + (y1 - y2) **2)
+
+def line_param(x1, y1, x2, y2):
+    a = (y1 - y2) /(x1 - x2)
+    return [a, y1 - a*x1]
