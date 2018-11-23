@@ -717,10 +717,10 @@ def vis_one_image(
             ax.text(
                 bbox[0], bbox[1] - 2,
                 get_class_string(classes[i], score, dataset),
-                fontsize=3,
+                fontsize=8,
                 family='serif',
                 bbox=dict(
-                    facecolor='g', alpha=0.4, pad=0, edgecolor='none'),
+                    facecolor='g', alpha=0.9, pad=0, edgecolor='none'),
                 color='white')
 
         # show mask

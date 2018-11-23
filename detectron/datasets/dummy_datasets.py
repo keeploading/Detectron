@@ -47,39 +47,31 @@ def get_coco_dataset():
     # classes = ['__background__', 'lane']
     #
     # classes = ['__background__',
-    #                           'ego vehicle',
-    #                           'rectification border',
-    #                           'out of roi',
-    #                           'static',
-    #                           'dynamic',
-    #                           'ground',
-    #                           'road',
-    #                           'sidewalk',
-    #                           'parking',
-    #                           'rail track',
-    #                           'building',
-    #                           'wall',
-    #                           'fence',
-    #                           'guard rail',
-    #                           'bridge',
-    #                           'tunnel',
-    #                           'pole',
-    #                           'polegroup',
-    #                           'traffic light',
-    #                           'traffic sign',
-    #                           'vegetation',
-    #                           'terrain',
-    #                           'sky',
-    #                           'person',
-    #                           'rider',
-    #                           'car',
-    #                           'truck',
-    #                           'bus',
-    #                           'caravan',
-    #                           'trailer',
-    #                           'train',
-    #                           'motorcycle',
-    #                           'bicycle',
+    #     'line_1',
+    #     'line_2',
+    #     'line_3',
+    #     'line_4',
+    #     'line_5',
+    #     'line_6',
+    #     'line_7',
+    #     'line_8',
+    #     'road_1',
+    #     'road_12',
+    #     'road_2',
+    #     'road_23',
+    #     'road_3',
+    #     'road_34',
+    #     'road_4',
+    #     'road_45',
+    #     'road_5',
+    #     'road_56',
+    #     'road_6',
+    #     'road_67',
+    #     'road_7',
+    #     'road_78',
+    #     'road_8',
+    #     'car',
+    #     'boundary'
     # ]
     classes = ['__background__',
         'guard rail',
@@ -96,7 +88,8 @@ def get_coco_dataset():
         'yellow dashed dashed',
         'yellow dashed-solid',
         'yellow solid-dashed',
-        'boundary'
+        'boundary',
+        'fork_line'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds
@@ -117,7 +110,8 @@ def get_line_dataset():
         'yellow dashed dashed',
         'yellow dashed-solid',
         'yellow solid-dashed',
-        'boundary'
+        'boundary',
+        'fork_line'
     ]
     return classes
 
@@ -127,7 +121,8 @@ def get_color_dataset(classes):
                   'solid':[0., 1., 0.],
                   'boundary':[0., 0., 1.],
                   'solid solid':[1., 1., 0.],
-                  'dashed dashed':[0., 1., 1.]
+                  'dashed dashed':[0., 1., 1.],
+                  'fork_line':[0., 0., 1.],
                   }
     if not classes in color_list:
         return None
