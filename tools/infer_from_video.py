@@ -63,9 +63,13 @@ import arp.messaging as messaging
 from arp.fusion_kalman import Fusion
 from arp.fusion_particle_line import FusionParticle
 from arp.detection_filter import get_predict_list
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
-CUT_OFFSET_PX2 = [277, 426]
-CUT_OFFSET_PC = [302, 451]
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP, camera_img_type
+CUT_OFFSET_IMG = [302, 451]
+if camera_img_type == 1:
+    CUT_OFFSET_IMG = [277, 426]
+elif camera_img_type == 2:
+    CUT_OFFSET_IMG = [333, 469]
+
 
 c2_utils.import_detectron_ops()
 
@@ -260,16 +264,14 @@ def drawParticles(image, particles):
 
 def drawParabola(image, line_param, type, color):
     points = []
-    for x in range(-800, 10, 10):
+    for x in range(-800, 30, 10):
         points.append([line_param[0] * x**2 + line_param[1] * x + line_param[2], x])
     points = np.array(points)
     points[:,0] = points[:,0] + IMAGE_WID/2
     points[:,1] = points[:,1] + IMAGE_HEI
     points = cv2.perspectiveTransform(np.array([points], dtype='float32'), np.array(H_OP))
-    if is_px2:
-        offset_y = CUT_OFFSET_PX2[0] if scale_size else 2 * CUT_OFFSET_PX2[0]
-    else:
-        offset_y = CUT_OFFSET_PC[0] if scale_size else 2 * CUT_OFFSET_PC[0]
+
+    offset_y = CUT_OFFSET_IMG[0]
     points = points[0]
     points[:,1] = points[:,1] + offset_y
     # print ("drawParabola points:" + str(points))
@@ -430,7 +432,11 @@ def main(args):
                 if len(message) < 100:
                     continue
                 img_np = np.fromstring(message, np.uint8)
-                img_np = img_np.reshape((1208, 1920,3))
+                if camera_img_type != 2:
+                    img_np = img_np.reshape((1208, 1920,3))
+                else:
+                    img_np = img_np.reshape((604, 960,3))
+
                 print("nparr type:" + str(type(img_np)) + " shape:" + str(img_np.shape))
                 ret = True
             except KeyboardInterrupt:
@@ -460,22 +466,14 @@ def main(args):
             print("time:" + str(t))
             time.sleep(0.001)
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
-            origin_im = np.copy(img_np)
             if scale_size:
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
                 origin_im = np.copy(img_np)
-                if is_px2:
-                    img_np = img_np[CUT_OFFSET_PX2[0]:CUT_OFFSET_PX2[1], 0:IMAGE_WID]
-                else:
-                    img_np = img_np[CUT_OFFSET_PC[0]:CUT_OFFSET_PC[1], 0:IMAGE_WID]
             else:
-                origin_im = origin_im[::2]
-                origin_im = origin_im[:,::2]
-                if is_px2:
-                    img_np = img_np[2*CUT_OFFSET_PX2[0]:2*CUT_OFFSET_PX2[1], 0:IMAGE_WID]
-                else:
-                    img_np = img_np[2*CUT_OFFSET_PC[0]:2*CUT_OFFSET_PC[1], 0:IMAGE_WID]
+                origin_im = np.copy(img_np)
+
+            img_np = img_np[CUT_OFFSET_IMG[0]:CUT_OFFSET_IMG[1], 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))

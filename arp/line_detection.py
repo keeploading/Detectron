@@ -47,24 +47,27 @@ from multiprocessing import Process, Manager
 
 plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 
+camera_img_type = 2#0:sh_pc 1:sh_px2 2:us_px2
 
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
-scale_size = True
-is_px2 = True
+scale_size = (camera_img_type != 2)
+is_px2 = (camera_img_type == 1)
 
-IMAGE_WID = 1920
-IMAGE_HEI = 1208
+IMAGE_WID = 960
+IMAGE_HEI = 604
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
 source_arr[:,1] = source_arr[:,1] - 604
-if is_px2:
+if camera_img_type == 1:
     print ("is_px2 is true")
     source_arr = np.float32([[907, 783],[1085,783],[1098,817],[892,817]])
     source_arr[:,1] = source_arr[:,1] - 554
-if scale_size:
-    IMAGE_WID = 960
-    IMAGE_HEI = 604
+elif camera_img_type == 2:
+    source_arr = np.float32([[848, 802], [1174, 802], [1276, 876], [776, 878]])
+    source_arr[:,1] = source_arr[:,1] - 666
+
+
 scale_rate = 1920./IMAGE_WID
 
 source_arr = source_arr / scale_rate
@@ -74,6 +77,10 @@ BOX_SLOPE_LIMITED = IMAGE_HEI/(2. * lane_wid)#2*LANE_WID
 PARABORA_SLOPE_LIMITED = 600./120
 scale_h = 0.025
 scale_w = 0.28#1/3.5
+if camera_img_type == 2:
+    scale_h = 0.1
+    scale_w = 1
+
 offset_x = lane_wid * scale_w / 2
 offset_y = 1 - scale_h
 dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
@@ -83,6 +90,7 @@ dest_arr = np.float32([[IMAGE_WID / 2 - offset_x, IMAGE_HEI * offset_y],
 H = cv2.getPerspectiveTransform(source_arr, dest_arr)
 H_OP = cv2.getPerspectiveTransform(dest_arr, source_arr)
 print ("source_arr:" + str(source_arr))
+print ("dest_arr:" + str(dest_arr))
 print ("lane_wid:" + str(lane_wid))
 
 dist = np.array([[-0.35262804, 0.15311474, 0.00038879, 0.00048328, - 0.03534825]])
