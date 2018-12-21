@@ -89,7 +89,8 @@ def get_coco_dataset():
         'yellow dashed-solid',
         'yellow solid-dashed',
         'boundary',
-        'fork_line'
+        'fork_line',
+        'sidewalk'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds
@@ -115,6 +116,23 @@ def get_line_dataset():
     ]
     return classes
 
+def isLaneLine(type1, type2):
+    classes = [
+        'dashed',
+        'solid',
+        'solid solid',
+        'dashed dashed',
+        'dashed-solid',
+        'solid-dashed',
+        'yellow dashed',
+        'yellow solid',
+        'yellow solid solid',
+        'yellow dashed dashed',
+        'yellow dashed-solid',
+        'yellow solid-dashed',
+    ]
+    return (type1 in classes and type2 in classes)
+
 def get_color_dataset(classes):
 
     color_list = {'dashed':[1., 0., 0.],
@@ -127,3 +145,10 @@ def get_color_dataset(classes):
     if not classes in color_list:
         return None
     return np.array(color_list[classes]) *255
+
+
+def get_perspective_color(index):
+    perspective_color = [[255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0], [255, 0, 255],
+                         [0, 255, 255], [100, 100, 100], [100, 0, 0], [0, 100, 0], [0, 0, 100], [100, 100, 0], [100, 0, 100], [0, 100, 100],
+                        [200, 200, 200], [200, 0, 0], [0, 200, 0], [0, 0, 200], [200, 200, 0], [200, 0, 200], [0, 200, 200]]
+    return perspective_color[index]

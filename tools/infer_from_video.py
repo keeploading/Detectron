@@ -54,21 +54,22 @@ import detectron.utils.c2 as c2_utils
 import detectron.utils.vis as vis_utils
 import arp.line_detection as detection
 from multiprocessing import Process, Queue
+from Queue import Empty
 import json
 import math
 import copy
 from arp.line_detection import lane_wid
 import arp.const as const
-import arp.messaging as messaging
 from arp.fusion_kalman import Fusion
 from arp.fusion_particle_line import FusionParticle
-from arp.detection_filter import get_predict_list
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP, camera_img_type
-CUT_OFFSET_IMG = [302, 451]
-if camera_img_type == 1:
-    CUT_OFFSET_IMG = [277, 426]
-elif camera_img_type == 2:
-    CUT_OFFSET_IMG = [333, 469]
+from arp.detection_filter import LineFilter
+from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
+
+CUT_OFFSET_IMG = [277, 426]
+if const.CAMERA_TYPE == 1:
+    CUT_OFFSET_IMG = [302, 451]
+elif const.CAMERA_TYPE == 2:
+    CUT_OFFSET_IMG = [330, 478]
 
 
 c2_utils.import_detectron_ops()
@@ -135,7 +136,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         )
     predict_time.append(time.time() - t)
     # logger.info('Inference time: {:.3f}s'.format(time.time() - t))
-    # logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
+    logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
     # for k, v in timers.items():
     #     logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
     if frameId == 1:
@@ -158,7 +159,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
         frame_id=frameId,
         img_debug = img_debug
     )
-    im, mid_im, top_im, result = ret
+    im, mid_im, top_im, result, fork_pos = ret
     process_time.append(time.time() - t)
     logger.info('get_detection_line time: {:.3f}s'.format(time.time() - t))
     #
@@ -166,90 +167,16 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
     line_list = None
     cache_list = None
     particles = None
+    filter_list = None
     if not result is None:
-        line_list, cache_list, filter_list, particles = add2MsgQueue(result, frameId, img_debug)
+        line_list, cache_list, filter_list, particles = add2MsgQueue(result, frameId, fork_pos, img_debug)
+    g_debug_img_queue.put((origin_im, im, mid_im, top_im, line_list, cache_list, filter_list, frameId, fork_pos))
+    if g_debug_img_queue.full():
+        try:
+            g_debug_img_queue.get_nowait()
+        except Empty:
+            print ("Queue.Empty")
 
-
-    if img_debug:
-        half_size = (int(im.shape[1]/2), int(im.shape[0]/2))
-        if IMAGE_WID > 960:
-            im = cv2.resize(im, half_size)
-            top_im = cv2.resize(top_im, (960, 604))
-
-            mid_im = cv2.resize(mid_im, half_size)
-            # mid_im = mid_im[604:902, 0:IMAGE_WID]
-            # mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
-        else:
-            # mid_im = mid_im[302:451, 0:IMAGE_WID]
-            pass
-        if not particles is None:
-            drawParticles(origin_im, particles)
-
-        if (not line_list is None) and (not cache_list is None):
-            x_pos = []
-            x_pos_11 = []
-            prob_wid = IMAGE_WID
-            if prob_wid > 960:
-                prob_wid = prob_wid / 2
-            for i in range(-int(prob_wid / 2), int(prob_wid / 2), 1):
-                matched_y = 1
-                matched_y_11 = 2
-                for l in line_list:
-                    dis = abs(l['x'] - i)
-                    if dis < 4:
-                        # hei = dis
-                        if l['type'] == "boundary":
-                            matched_y = int(220 * l['score'])
-                        else:
-                            matched_y = int(190 * l['score'] - dis * dis)
-                for l in cache_list:
-                    dis = abs(l['x'] - i)
-                    if dis < 8:
-                        matched_y_11 = int(200 * l['score'] - dis * dis)
-                x_pos.append([i + int(prob_wid / 2), matched_y])
-                x_pos_11.append([i + int(prob_wid / 2), matched_y_11])
-            # h = np.zeros((100, IMAGE_WID, 3))
-            cv2.polylines(origin_im, [np.array(x_pos)], False, (0, 255, 0))
-            cv2.polylines(origin_im, [np.array(x_pos_11)], False, (0, 0, 255))
-            # origin_im = np.flipud(origin_im)
-
-            # cv2.imshow('prob', h)
-            # cv2.waitKey(1)
-        if not result is None:
-            # for (line_param, line_type) in zip(result[0], result[1]):
-            #     drawParabola(origin_im, line_param[0:3].tolist(), line_type)
-            line_array = []
-            for line in line_list:
-                line_param = line['curve_param']
-                line_type = line['type']
-                points = drawParabola(origin_im, line_param[0:3], line_type, color = (0, 200, 0))
-                line_array.append(points)
-
-            if not filter_list is None:
-                for line in filter_list:
-                    line_param = line['curve_param']
-                    line_type = line['type']
-                    drawParabola(origin_im, line_param[0:3], line_type, color = (200, 0, 0))
-            overlay = origin_im.copy()
-            color = [(255,0,0), (0,255,0), (0,0,255),(255,255,0),(0,255,255),(255,0,255)]
-            # for index in range(len(line_array)):
-            #     if index > 0:
-            #         left_line = line_array[index - 1]
-            #         right_line = line_array[index]
-            #         fill_points = np.array([np.append(left_line, right_line[::-1], axis=0)], dtype=np.int32)
-            #         print ("fill_points:" + str(fill_points.shape))
-            #         print ("color[index - 1]:" + str(color[index - 1]))
-            #         cv2.fillPoly(overlay, fill_points, color[index - 1])
-            # alpha = 0.2
-            # cv2.addWeighted(overlay, alpha, origin_im, 1-alpha, 0, origin_im)
-
-        # origin_im
-        origin_im = np.append(origin_im, top_im, axis=1)
-        im = np.append(im, mid_im, axis=1)
-        show_img = np.append(origin_im, im, axis=0)
-        cv2.imwrite(os.path.join(args.output_dir, "source_"+ str(frameId) + ".png"), show_img)
-        cv2.imshow('carlab1', show_img)
-        cv2.waitKey(1)
 
 def drawParticles(image, particles):
     histogram = np.array([[i, 0] for i in range(500)])
@@ -275,20 +202,50 @@ def drawParabola(image, line_param, type, color):
     points = points[0]
     points[:,1] = points[:,1] + offset_y
     # print ("drawParabola points:" + str(points))
-    cv2.polylines(image, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
-    return points
 
-def add2MsgQueue(result, frameId, img_debug):
-    line_list = []
+    parabola_im = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
+    if type in ["yellow dashed", "yellow solid", "yellow solid solid", "yellow dashed dashed", "yellow dashed-solid", "yellow solid-dashed"]:
+        cv2.polylines(parabola_im, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, (0, 200, 200), thickness=2)
+    elif type == "boundary":
+        cv2.polylines(parabola_im, np.int32([np.vstack((points[:, 0], points[:, 1])).T]), False, (0, 0, 200), thickness=4)
+    else:
+        cv2.polylines(parabola_im, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
+    kernel = np.ones((5,5), np.float32) / 25
+    parabola_im = cv2.filter2D(parabola_im, -1, kernel)
+    # parabola_im = cv2.GaussianBlur(parabola_im, (16, 16),0)
+    image = cv2.addWeighted(image, 1., parabola_im, 1., 0)
+    return image
+
+def add2MsgQueue(result, frameId, fork_x, img_debug):
     if (result is None) or len(result[0]) == 0:
         print ("error: len(line_list) == 0")
-        return line_list, None
+        return [], None
 
-    for (line_param, line_type) in zip(result[0], result[1]):
-        # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
-        line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2], 'middle':line_param[5]}
-        line_list.append(line_info)
-    line_list, cache_list = get_predict_list(line_list, frameId)
+    full_line_list = []
+    full_cache_list = []
+    line_filter = [left_fork_filter]
+    is_fork = (len(result) == 2)
+    if is_fork:
+        if not right_fork_filter.isAvialabel():
+            right_fork_filter.reset(left_fork_filter.cache_list)
+        line_filter.append(right_fork_filter)
+    else:
+        if right_fork_filter.isAvialabel():
+            left_fork_filter.extend(right_fork_filter.cache_list)
+
+    for index, parabola_param in enumerate(result):
+        line_list = []
+        for (line_param, line_type) in zip(parabola_param[0], parabola_param[1]):
+            if abs(line_param[2]) > 500:
+                print ("abs(line_param[2]) > 500")
+                continue
+            # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
+            line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2], 'middle':line_param[5]}
+            line_list.append(line_info)
+        line_list, cache_list = line_filter[index].get_predict_list(line_list, frameId, fork_x[0] if is_fork else None, index == 0)
+        full_line_list.append(line_list)
+        full_cache_list.append(cache_list)
+
     filter_list = None
     particles = None
     # filter_list = dr_filter(line_list)
@@ -296,13 +253,13 @@ def add2MsgQueue(result, frameId, img_debug):
     # if not ret is None:
     #     filter_list, particles = ret
 
-    finalMessage = {'frame': frameId, 'line_list': line_list, 'timestamp': time.time()}
+    finalMessage = {'frame': frameId, 'timestamp': time.time(), 'is_fork': is_fork, 'line_list': full_line_list[0]}
     print ("finalMessage:" + str(finalMessage))
     json_str = json.dumps(finalMessage)
     if g_detect_queue.full():
         g_detect_queue.get_nowait()
     g_detect_queue.put(json_str)
-    return line_list, cache_list, filter_list, particles
+    return full_line_list, full_cache_list, filter_list, particles
 
 def get_right_parabola(line_list):
     for index, line in enumerate(line_list):
@@ -396,6 +353,8 @@ def dr_filter(line_list):
         line["curve_param"][2] += dalta_x
     return filter_list
 
+left_fork_filter = LineFilter()
+right_fork_filter = LineFilter()
 def main(args):
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
@@ -404,6 +363,7 @@ def main(args):
     assert_and_infer_cfg(cache_urls=False)
     model = infer_engine.initialize_model_from_cfg(args.weights)
     dummy_coco_dataset = dummy_datasets.get_coco_dataset()
+
     zmq_video = args.video == "zmq"
     frameId = 0
     print ("args.video:" + str(args.video))
@@ -432,7 +392,7 @@ def main(args):
                 if len(message) < 100:
                     continue
                 img_np = np.fromstring(message, np.uint8)
-                if camera_img_type != 2:
+                if const.CAMERA_TYPE != 2:
                     img_np = img_np.reshape((1208, 1920,3))
                 else:
                     img_np = img_np.reshape((604, 960,3))
@@ -479,6 +439,92 @@ def main(args):
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
 
+def show_debug_img():
+    print ("debug img process start !")
+    while(True):
+        message = g_debug_img_queue.get(True)
+        if not message is None:
+            origin_im, im, mid_im, top_im, line_list_array, cache_list_array, filter_list_array, frameId, fork_pos = message
+
+            half_size = (int(im.shape[1] / 2), int(im.shape[0] / 2))
+            if IMAGE_WID > 960:
+                im = cv2.resize(im, half_size)
+                top_im = cv2.resize(top_im, (960, 604))
+
+                mid_im = cv2.resize(mid_im, half_size)
+                # mid_im = mid_im[604:902, 0:IMAGE_WID]
+                # mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
+            else:
+                # mid_im = mid_im[302:451, 0:IMAGE_WID]
+                pass
+
+            if (not line_list_array is None) and (not cache_list_array is None):
+                if filter_list_array is None:
+                    filter_list_array = [[]] if len(line_list_array) == 1 else [[],[]]
+                line_color = [(0, 200, 0), (100, 200, 0)]
+                for line_list, cache_list, filter_list, color in zip(line_list_array, cache_list_array, filter_list_array, line_color):
+                    x_pos = []
+                    x_pos_11 = []
+                    prob_wid = IMAGE_WID
+                    if prob_wid > 960:
+                        prob_wid = prob_wid / 2
+                    for i in range(-int(prob_wid / 2), int(prob_wid / 2), 1):
+                        matched_y = 1
+                        matched_y_11 = 2
+                        for l in line_list:
+                            dis = abs(l['x'] - i)
+                            if dis < 4:
+                                # hei = dis
+                                if l['type'] == "boundary":
+                                    matched_y = int(220 * l['score'])
+                                else:
+                                    matched_y = int(190 * l['score'] - dis * dis)
+                        for l in cache_list:
+                            dis = abs(l['x'] - i)
+                            if dis < 8:
+                                matched_y_11 = int(200 * l['score'] - dis * dis)
+                        x_pos.append([i + int(prob_wid / 2), matched_y])
+                        x_pos_11.append([i + int(prob_wid / 2), matched_y_11])
+                    # h = np.zeros((100, IMAGE_WID, 3))
+                    cv2.polylines(origin_im, [np.array(x_pos)], False, (0, 255, 0))
+                    cv2.polylines(origin_im, [np.array(x_pos_11)], False, (0, 0, 255))
+                    # origin_im = np.flipud(origin_im)
+
+                    # cv2.imshow('prob', h)
+                    # cv2.waitKey(1)
+
+                    for line in line_list:
+                        line_param = line['curve_param']
+                        line_type = line['type']
+                        origin_im = drawParabola(origin_im, line_param[0:3], line_type, color=color)
+
+                    if not filter_list is None:
+                        for line in filter_list:
+                            line_param = line['curve_param']
+                            line_type = line['type']
+                            origin_im = drawParabola(origin_im, line_param[0:3], line_type, color=(200, 0, 0))
+                    overlay = origin_im.copy()
+                    color = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (0, 255, 255), (255, 0, 255)]
+                    # for index in range(len(line_array)):
+                    #     if index > 0:
+                    #         left_line = line_array[index - 1]
+                    #         right_line = line_array[index]
+                    #         fill_points = np.array([np.append(left_line, right_line[::-1], axis=0)], dtype=np.int32)
+                    #         print ("fill_points:" + str(fill_points.shape))
+                    #         print ("color[index - 1]:" + str(color[index - 1]))
+                    #         cv2.fillPoly(overlay, fill_points, color[index - 1])
+                    # alpha = 0.2
+                    # cv2.addWeighted(overlay, alpha, origin_im, 1-alpha, 0, origin_im)
+
+            # origin_im
+            origin_im = np.append(origin_im, top_im, axis=1)
+            im = np.append(im, mid_im, axis=1)
+            show_img = np.append(origin_im, im, axis=0)
+            cv2.imwrite(os.path.join(args.output_dir, "source_" + str(frameId) + ".png"), show_img)
+            cv2.imshow('carlab1', show_img)
+            cv2.waitKey(1)
+
+
 def result_sender():
     print ("sender process start !")
     context = zmq.Context()
@@ -523,6 +569,11 @@ if __name__ == '__main__':
     g_detect_queue = Queue(2)
     g_dr_queue = Queue(10)
     p = Process(target=result_sender)
+    p.start()
+
+
+    g_debug_img_queue = Queue(2)
+    p = Process(target=show_debug_img)
     p.start()
     # pdr_receiver = Process(target=dr_recever)
     # pdr_receiver.start()

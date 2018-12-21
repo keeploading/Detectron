@@ -38,8 +38,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
 from scipy import optimize
 import math
-import logging
-import sys
+import arp.const as const
 import time
 import arp.math_utils as math_utils
 
@@ -47,25 +46,23 @@ from multiprocessing import Process, Manager
 
 plt.rcParams['pdf.fonttype'] = 42  # For editing in Adobe Illustrator
 
-camera_img_type = 2#0:sh_pc 1:sh_px2 2:us_px2
-
 _GRAY = (218, 227, 218)
 _GREEN = (18, 127, 15)
 _WHITE = (255, 255, 255)
-scale_size = (camera_img_type != 2)
-is_px2 = (camera_img_type == 1)
+scale_size = (const.CAMERA_TYPE != 2)
+is_px2 = (const.CAMERA_TYPE == 1)
 
 IMAGE_WID = 960
 IMAGE_HEI = 604
 source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
 source_arr[:,1] = source_arr[:,1] - 604
-if camera_img_type == 1:
+if const.CAMERA_TYPE == 1:
     print ("is_px2 is true")
     source_arr = np.float32([[907, 783],[1085,783],[1098,817],[892,817]])
     source_arr[:,1] = source_arr[:,1] - 554
-elif camera_img_type == 2:
-    source_arr = np.float32([[848, 802], [1174, 802], [1276, 876], [776, 878]])
-    source_arr[:,1] = source_arr[:,1] - 666
+elif const.CAMERA_TYPE == 2:
+    source_arr = np.float32([[852, 860], [1270, 860], [1396, 956], [764, 956]])
+    source_arr[:,1] = source_arr[:,1] - 670
 
 
 scale_rate = 1920./IMAGE_WID
@@ -73,12 +70,13 @@ scale_rate = 1920./IMAGE_WID
 source_arr = source_arr / scale_rate
 # source_arr = np.float32([[459. , 420.5],[546. , 420.5],[551.5, 437. ],[451.5, 437. ]])
 lane_wid = 200 / scale_rate
-BOX_SLOPE_LIMITED = IMAGE_HEI/(2. * lane_wid)#2*LANE_WID
+BOX_SLOPE_LIMITED = 1
 PARABORA_SLOPE_LIMITED = 600./120
 scale_h = 0.025
 scale_w = 0.28#1/3.5
-if camera_img_type == 2:
-    scale_h = 0.1
+mileage_trigger = 30 if const.ROAD_TYPE == 0 else 20
+if const.CAMERA_TYPE == 2:
+    scale_h = 0.1 if const.ROAD_TYPE == 0 else 0.5
     scale_w = 1
 
 offset_x = lane_wid * scale_w / 2
@@ -99,11 +97,12 @@ CURVETURE_MAX = 50.0/(IMAGE_HEI*IMAGE_HEI)
 
 manager = Manager()
 masks_list = manager.dict()
-
+fork_endtime = None
+fork_pos = None
 
 def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thresh=2,
         show_box=True, dataset=None, show_class=False, frame_id = 0, img_debug = False):
-
+    global fork_endtime
     """Constructs a numpy array with the detections visualized."""
 
     im = np.array(im)
@@ -139,6 +138,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
     # del curve_objs[:]
 
     t = time.time()
+    color_index = 0
     for i in sorted_inds:
         bbox = boxes[i, :4]
         score = boxes[i, -1]
@@ -167,18 +167,23 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
                 mid_im = vis_roi(mid_im, masks[..., i], color_mask)
 
             if img_debug:
-                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, type, score)
+                perspective_color = dummy_datasets.get_perspective_color(color_index)
+                im, perspective_img = vis_mask(im, perspective_img, curve_objs, masks[..., i], color_mask, perspective_color, type, score)
+                color_index += 1
             elif type in line_class:
                 t_find_curve = time.time()
                 build_curve_objs(curve_objs, masks[..., i], type, score, img_debug)
                 print ("build_curve_objs time:{}".format(time.time() - t_find_curve) )
 
-    print ('loop for build_curve_objs time: {:.3f}s'.format(time.time() - t))
-
+    print ('loop for build_curve_objs time: {:.3f}s, frame_id:{}'.format(time.time() - t, frame_id))
     parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug)
-    return im, mid_im, perspective_img, parabola_params
+    if parabola_params is None:
+        return im, mid_im, perspective_img, None, None
+    parabola_params, fork_pos = parabola_params
+    return im, mid_im, perspective_img, parabola_params, fork_pos
 
 def optimize_parabola(perspective_img, curve_objs, img_debug):
+    global fork_pos, fork_endtime
     if len(curve_objs) == 0:
         return
     parabola_params = []
@@ -188,105 +193,206 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
     classes_param = []
 
     t = time.time()
+    new_fork_pos = None
     print ("len(curve_objs):" + str(len(curve_objs)))
+
     for curve_obj in curve_objs:
         length = len(curve_obj["points"])
-        if length < 3:
-            print ("number of points not much!" + str(length))
-            continue
+        curve_type = curve_obj["classes"]
+        print ("curve_type:{}".format(curve_type))
         curve = np.array(np.array(curve_obj["points"]))#[30:length-20, 0:2])
         # curve = curve[0: len(curve): 10]
         curve = curve[curve[:,1].argsort()]
         # curve = curve - [im.shape[1]/2, 0]
         # curve = curve - [0, im.shape[0]/2]
-        curve_type = curve_obj["classes"]
         middle = (curve_obj["end_x_right"] + curve_obj["start_x_left"]) / 2
         max_y = max(curve[:,1])
         min_y = min(curve[:,1])
+        middle_y = (max_y + min_y) / 2
         offset_y = max_y - min_y
         offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if curve_type != "boundary" and offset_y < IMAGE_HEI:
-            pass
-        elif offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
-            # print ("offset_y:" + str(offset_y) + " offset_x:" + str(offset_x))
-            # print ("min_y:" + str(min_y) + " max_y:" + str(max_y))
-            # print ("min_x:" + str(curve_obj["start_x_left"]) + " max_x:" + str(curve_obj["end_x_right"]))
+        if curve_type == "fork_line":
+            new_fork_pos = [middle - 10, middle_y] if middle < 0 else [middle + 10, middle_y]
+            print ("fork_pos:{}".format(new_fork_pos))
             continue
+        if length < 3:
+            print ("number of points not much!" + str(length))
+            continue
+
+        if curve_type != "boundary" or curve_type == "fork_line":
+            pass
+        else:
+            if offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
+                continue
+            if curve_obj["mileage"] < 30:
+                continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
-        belive = length + 5* 20. / (curve_obj["mileage"]/length)
+        belive = length + 300. / (curve_obj["mileage"]/length)
         # print ("mileage:" + str(curve_obj["mileage"]/length))
         parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], belive, middle, min_y + offset_y/2]#, curve_obj["classes"]
+        print ("parabola_param:{}".format(parabola_param))
         parabola_params.append(parabola_param)
-        parabola_box.append([curve_obj["start_x_left"], min_y, curve_obj["end_x_right"], max_y])
         classes_param.append(curve_type)
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] < 0:
+        parabola_box.append([curve_obj["start_x_left"], min_y, curve_obj["end_x_right"], max_y])
+
+        if curve_type == "boundary" and parabolaC < 0:
             if (left_boundary is None) or \
                     ((not left_boundary is None) and left_boundary[-2] < parabola_param[-2]):
                 adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
                 # adjust_x = curve_obj["end_x_right"]
                 # parabola_param[2] += (adjust_x - parabola_param[-1]) #boundary left edge
-                parabola_param[2] = adjust_x #boundary left edge
+                # parabola_param[2] = adjust_x #boundary left edge
                 parabola_param[5] = adjust_x
                 left_boundary = parabola_param
-        if curve_type == "boundary" and curve_obj["start_x_left"] + curve_obj["end_x_right"] > 0:
+        if curve_type == "boundary" and parabolaC > 0:
             if (right_boundary is None) or \
-                    ((not right_boundary is None) and right_boundary[-1] > parabola_param[-1]):
+                    ((not right_boundary is None) and right_boundary[-2] > parabola_param[-2]):
                 adjust_x = (curve_obj["start_x_left"] + curve_obj["end_x_left"]) / 2
                 # parabola_param[2] += (adjust_x - parabola_param[-1])
-                parabola_param[2] = adjust_x
+                # parabola_param[2] = adjust_x
                 parabola_param[5] = adjust_x
                 right_boundary = parabola_param
     parabola_param_np = np.array(parabola_params)
     classes_param = np.array(classes_param)
     parabola_box = np.array(parabola_box)
-    if not left_boundary is None:
-        keep_index = parabola_param_np[:,5] >= left_boundary[5]
-        parabola_param_np = parabola_param_np[keep_index]
-        classes_param = classes_param[keep_index]
-        parabola_box = parabola_box[keep_index]
-    if not right_boundary is None:
-        keep_index = parabola_param_np[:,5] <= right_boundary[5]
-        parabola_param_np = parabola_param_np[keep_index]
-        classes_param = classes_param[keep_index]
-        parabola_box = parabola_box[keep_index]
-    # parabola_param_np = parabola_param_np[:,0:3]
 
-    ret = get_good_parabola(parabola_param_np, parabola_box)
-    if ret is None:
-        print ("errer: bad frame detection, didn't find good parabola!")
-        return
-    good_parabola, index_param = ret
-    curve = np.arange(-IMAGE_HEI, 0, 10)
-    x_log = []
-    for index, parabola in enumerate(parabola_param_np):
-        if index == index_param:
-            if img_debug:
-                x_log.append(parabola[2])
-                y = parabola[0] * curve * curve + parabola[1] * curve + parabola[2]
-                color = (100, 0, 20)
-                cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=10)
+    boundarys = [[left_boundary, right_boundary]]
+
+    is_fork = (not new_fork_pos is None)
+    if not new_fork_pos is None:
+        fork_endtime = time.time() + 3
+        fork_pos = new_fork_pos
+        is_fork = True
+    elif (not fork_endtime is None) and time.time() < fork_endtime:
+        is_fork = True
+    else:
+        is_fork = False
+
+    is_fork_enable = const.ENABLE_FORK
+    if is_fork and not is_fork_enable:
+        keep_index = None
+        if fork_pos[0] < 0:
+            keep_index = parabola_param_np[:, -2] >= fork_pos[0]
         else:
-            # predict_parabola = parabola[0:3]
-            y = get_parabola_y(good_parabola, parabola[-1])
-            predict_parabola = get_parabola_by_distance(good_parabola, parabola[5] - y)
-            if predict_parabola is None:
-                continue
-            parabola_param_np[index][0:3] = predict_parabola
-            if parabola_param_np[index][0] == 0:
-                pass
-            if img_debug:
-                color = (255, 255, 255)
-                x_log.append(predict_parabola[2])
-                y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
-                cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=10)
+            keep_index = parabola_param_np[:, -2] < fork_pos[0]
+        parabola_param_np = parabola_param_np[keep_index]
+        classes_param = classes_param[keep_index]
+        parabola_box = parabola_box[keep_index]
 
-    if not perspective_img is None:
-        perspective_img = perspective_img.astype(np.float32)
+    parabola_param_list = []
+    classes_param_list = []
+    parabola_box_list = []
+
+    if is_fork_enable and is_fork:
+        left = []
+        right = []
+        for index in range(len(parabola_param_np)):
+            if classes_param[index] != "boundary":
+                continue
+            if parabola_param_np[index][-2] < fork_pos[0]:
+                left.append(parabola_param_np[index])
+            else:
+                right.append(parabola_param_np[index])
+        left_center = fork_pos[0] - lane_wid/2
+        right_center = fork_pos[0] + lane_wid/2
+        left_left_boundary = None
+        left_right_boundary = None
+
+        right_left_boundary = None
+        right_right_boundary = None
+        for b in left:
+            if (b[-2] < left_center) and ((left_left_boundary == None) or (left_left_boundary[-2] < b[-2])):
+                left_left_boundary = b.tolist()
+            if (b[-2] > left_center) and ((left_right_boundary == None) or (left_right_boundary[-2] > b[-2])):
+                left_right_boundary = b.tolist()
+
+        for b in right:
+            if (b[-2] < right_center) and ((right_left_boundary == None) or (right_left_boundary[-2] < b[-2])):
+                right_left_boundary = b.tolist()
+            if (b[-2] > right_center) and ((right_right_boundary is None) or (right_right_boundary[-2] > b[-2])):
+                right_right_boundary = b.tolist()
+        boundarys = [[left_left_boundary, left_right_boundary],[right_left_boundary, right_right_boundary]]
+
+        left_fork_index = parabola_param_np[:, -2] <= fork_pos[0]
+        right_fork_index = parabola_param_np[:, -2] > fork_pos[0]
+
+        parabola_param_list.append(parabola_param_np[left_fork_index])
+        parabola_param_list.append(parabola_param_np[right_fork_index])
+        classes_param_list.append(classes_param[left_fork_index])
+        classes_param_list.append(classes_param[right_fork_index])
+        parabola_box_list.append(parabola_box[left_fork_index])
+        parabola_box_list.append(parabola_box[right_fork_index])
+    else:
+        parabola_param_list.append(parabola_param_np)
+        classes_param_list.append(classes_param)
+        parabola_box_list.append(parabola_box)
+
+    ret_parabola = []
+    for parabola_param_np, classes_param, parabola_box, boundary in zip(parabola_param_list, classes_param_list, parabola_box_list, boundarys):
+        if not boundary[0] is None:#left
+            keep_index = parabola_param_np[:,2] >= boundary[0][2]
+            parabola_param_np = parabola_param_np[keep_index]
+            classes_param = classes_param[keep_index]
+            parabola_box = parabola_box[keep_index]
+        if not boundary[1] is None:#right
+            keep_index = parabola_param_np[:,2] <= boundary[1][2]
+            parabola_param_np = parabola_param_np[keep_index]
+            classes_param = classes_param[keep_index]
+            parabola_box = parabola_box[keep_index]
+        # parabola_param_np = parabola_param_np[:,0:3]
+        for tmp_box in parabola_box:
+            cv2.rectangle(perspective_img, (int(tmp_box[0] + IMAGE_WID/2), int(tmp_box[1] + IMAGE_HEI)), (int(tmp_box[2] + IMAGE_WID/2), int(tmp_box[3] + IMAGE_HEI)), (100, 0, 0), 2)
+
+        ret = get_good_parabola(parabola_param_np, parabola_box)
+        if ret is None:
+            print ("errer: bad frame detection, didn't find good parabola!")
+            continue
+        good_parabola, index_param = ret
+        curve = np.arange(-IMAGE_HEI, 0, 10)
+        x_log = []
+        for index, parabola in enumerate(parabola_param_np):
+            if index == index_param:
+                print ("good_parabola:{}, parabola:{}".format(good_parabola, parabola))
+                if img_debug:
+                    x_log.append(parabola[2])
+                    y = parabola[0] * curve * curve + parabola[1] * curve + parabola[2]
+                    color = (100, 0, 20)
+                    cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=2)
+            else:
+                # predict_parabola = parabola[0:3]
+                y = get_parabola_y(good_parabola, parabola[-1])
+                relative_point = (parabola[-1], y)
+                relative_predict = (parabola[-1], get_parabola_y(parabola[0:3], parabola[-1]))
+                predict_parabola = get_parabola_by_distance(good_parabola, relative_predict[1] - y)
+                if predict_parabola is None:
+                    continue
+                parabola_param_np[index][0:3] = predict_parabola
+                if parabola_param_np[index][0] == 0:
+                    pass
+                if img_debug:
+                    color = (255, 255, 255)
+                    x_log.append(predict_parabola[2])
+                    y = predict_parabola[0] * curve * curve + predict_parabola[1] * curve + predict_parabola[2]
+                    cv2.polylines(perspective_img, np.int32([np.vstack((y + IMAGE_WID/2, curve + IMAGE_HEI)).T]), False, color, thickness=2)
+                    cv2.rectangle(perspective_img, (int(relative_point[1] + IMAGE_WID/2 - 5), int(relative_point[0] + IMAGE_HEI - 5)), (int(relative_point[1] + IMAGE_WID/2 + 5), int(relative_point[0] + IMAGE_HEI + 5)), (255, 0, 0), 2)
+                    cv2.rectangle(perspective_img, (int(relative_predict[1] + IMAGE_WID/2 - 5), int(relative_predict[0] + IMAGE_HEI - 5)), (int(relative_predict[1] + IMAGE_WID/2 + 5), int(relative_predict[0] + IMAGE_HEI + 5)), color, 2)
+        ret_parabola.append([parabola_param_np, classes_param])
+    if len(ret_parabola) == 0:
+        return None
+    if img_debug and is_fork and not fork_pos is None:
+        triangle_size = 10
+        triangle_center = [fork_pos[0] + IMAGE_WID/2, fork_pos[1] + IMAGE_HEI]
+        triangle_points = np.array([(triangle_center[0], triangle_center[1] - triangle_size), (triangle_center[0] + triangle_size, triangle_center[1] - 2*triangle_size),
+                                    (triangle_center[0], triangle_center[1] + 2*triangle_size), (triangle_center[0] - triangle_size, triangle_center[1] - 2*triangle_size),
+                                    (triangle_center[0], triangle_center[1] - triangle_size)])
+        print ("triangle_points:{}".format(triangle_points))
+        cv2.putText(perspective_img, "forked road detected !", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 1)
+        cv2.polylines(perspective_img, np.int32([np.vstack((triangle_points[:,0], triangle_points[:,1])).T]), False, (0, 255, 0))
     print ("x_log parabola_param_np:" + str(x_log))
     print ('get parabola_param_np time: {:.3f}s'.format(time.time() - t))
-    return [parabola_param_np, classes_param]
+    return ret_parabola, (fork_pos if is_fork_enable else None)
 
-def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
+def vis_mask(img, perspective_img, curve_objs,  mask, col, perspective_color, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
     """Visualizes a single binary mask."""
 
     color = dummy_datasets.get_color_dataset(classs_type)
@@ -300,7 +406,7 @@ def vis_mask(img, perspective_img, curve_objs,  mask, col, classs_type, score, a
         mask, top_idx = build_curve_objs(curve_objs, mask, classs_type, score, True)
         # perspective_img[top_idx[0], top_idx[1], :] *= 1.0 - alpha
         # perspective_img[top_idx[0], top_idx[1], :] += alpha * col
-        perspective_img[top_idx[1], top_idx[0], :] = [255, 255, 255]
+        perspective_img[top_idx[1], top_idx[0], :] = perspective_color
         # perspective_img[top_idx[0], top_idx[1], :] = [255, 255, 255]
 
 
@@ -348,24 +454,53 @@ def get_class(class_index, dataset):
         'id{:d}'.format(class_index)
     return class_text
 
+def get_closest_points(points, y):
+    index_close = -1
+    max_distance = 1000
+    for index, point in enumerate(points):
+        dis = abs(point[1] - y)
+        if max_distance > dis:
+            max_distance = dis
+            index_close = index
+    if index_close == 0:
+        return [points[0], points[1]]
+    elif index_close == len(points) - 1:
+        return [points[-1], points[-2]]
+    else:
+        dis1 = abs(points[index_close + 1][1] - y)
+        dis2 = abs(points[index_close - 1][1] - y)
+        if dis1 > dis2:
+            return [points[index_close], points[index_close - 1]]
+        else:
+            return [points[index_close], points[index_close + 1]]
+
 def add2curve(curve_objs, point, type, score):
+    print ("add2curve type:{}".format(type))
     matched = False
     for i in range(len(curve_objs)):
         obj = curve_objs[i]
-        distance = None
-        p1 = obj["points"][0]
-        p2 = obj["points"][-1]
-        distance = abs(p1[0] - point[0])
+        points = obj["points"]
+        distanceX = None
+        p1 = points[0]
+        p2 = points[-1]
+        distanceX = abs(p1[0] - point[0])
+        distanceY1 = p1[1] - point[1]
+        distanceY2 = p2[1] - point[1]
         if p1[0] != p2[0]:
+            # p1, p2 = get_closest_points(points, point[1])
             param = math_utils.line_param(p1[1], p1[0], p2[1], p2[0])#right-down to down-right
-            distance = abs(point[0]- (param[0] * point[1] + param[1]))
+            distanceX = abs(point[0]- (param[0] * point[1] + param[1]))
+            distanceY1 = p1[1] - point[1]
+            distanceY2 = p2[1] - point[1]
 
-        # if (point[1] - obj["points"][0][1]) > abs(point[1] - obj["points"][-1][1]):
-        #     distance = abs(obj["points"][-1][0] - point[0])
-        # else:
-        #     distance = abs(obj["points"][0][0] - point[0])
-        if obj["classes"] == type and distance < 20:
-            obj["points"].append(point)
+        if distanceY1 < 0 and distanceY2 > 0:
+            continue
+        if abs(distanceY1) > IMAGE_HEI / 3 and abs(distanceY2) > IMAGE_HEI / 3:
+            continue
+
+        if distanceX < 20 and (obj["classes"] == type or dummy_datasets.isLaneLine(obj["classes"], type)) :
+            print ("add2curve1 type1:{}, type2:{}".format(obj["classes"], type))
+            points.append(point)
             obj["mileage"] += (point[3] - point[2])
             if obj["start_x_left"] > point[2]:
                 obj["start_x_left"] = point[2]
@@ -389,42 +524,12 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
     top_idx = None
     if classs_type in line_class:
         # mask = cv2.undistort(mask, mtx, dist, None)
-        t = time.time()
-
-    #     top = cv2.warpPerspective(mask, H, (IMAGE_WID,IMAGE_HEI))
-    #     # if not img_debug:
-    #     for i in range(0, IMAGE_HEI, 40):
-    #         top[i: i + 39] = 0
-    #     for i in range(0, IMAGE_WID, 5):
-    #         top[:,i: i + 4] = 0
-    #     top_idx = np.nonzero(top)
-    #     if len(top_idx[0]) > 5:
-    #         # points = np.array(zip(top_idx[0], top_idx[1])) # too expansive
-    #         points = np.transpose(top_idx)
-    #         y_start = points[0][0]
-    #         x_start = points[0][1]
-    #         x_end = x_start
-    #         for single_point in points:
-    #             if single_point[0] != y_start:
-    #                 add2curve(curve_objs, [(x_end + x_start) / 2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-    #                 y_start = single_point[0]
-    #                 x_start = single_point[1]
-    #                 x_end = x_start
-    #             else:
-    #                 if single_point[1] - x_end > lane_wid / 4:
-    #                     add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
-    #                     y_start = single_point[0]
-    #                     x_start = single_point[1]
-    #                     x_end = x_start
-    #                 else:
-    #                     x_end = single_point[1]
-    # return mask, top_idx
-
-        dalta_list = np.array(range(0, 31))
-        dalta_list[0:10] = 4
-        # dalta_list = dalta_list[::-1]
+        mask_hei = int(len(mask) / const.MASK_SAMPLE_STEP)
+        dalta_list = np.ones(const.MASK_SAMPLE_STEP * mask_hei, dtype=int)
+        for i in range(const.MASK_SAMPLE_STEP):
+            dalta_list[i*mask_hei: i*mask_hei + mask_hei] = i
         mask_index = 0
-        for i in range(0, 30):
+        for i in range(0, len(mask) - const.MASK_SAMPLE_STEP):
             if mask_index >= IMAGE_HEI:
                 break
             mask[mask_index: mask_index + dalta_list[i]] = 0
@@ -456,7 +561,7 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
                     x_start = single_point[0]
                     x_end = x_start
                 else:
-                    if single_point[0] - x_end > lane_wid / 4:
+                    if single_point[0] - x_end > lane_wid / 10:
                         add2curve(curve_objs, [(x_end + x_start)/2 - IMAGE_WID /2, y_start - IMAGE_HEI, x_start - IMAGE_WID /2, x_end - IMAGE_WID /2], classs_type, score)
                         y_start = single_point[1]
                         x_start = single_point[0]
@@ -519,28 +624,39 @@ def undistort_multiprocess(mask, i):
     process.daemon = True
     return process
 
+def get_good_index(coefficient, suggest_index):
+    filter_coeffi = coefficient[suggest_index]
+    avg_believe = filter_coeffi[:, 4].tolist()
+    good_index = avg_believe.index(np.max(avg_believe))
+    total_belive = np.sum(filter_coeffi[:, 4])
+    filter_coeffi[:, 4] = filter_coeffi[:, 4] / total_belive
+    A = np.sum(filter_coeffi[:, 0] * filter_coeffi[:, 4])
+    B = np.sum(filter_coeffi[:, 1] * filter_coeffi[:, 4])
+    good_index = suggest_index[good_index]
+    coefficient[good_index][0] = A
+    coefficient[good_index][1] = B
+    return good_index
+
 def get_good_parabola(coefficient, parabola_box):
-    good_parabola = None
     good_index = 0
     min_gradient = 1
+    perfect_avg_indexs = []
     good_avg_indexs = []
     good_min_indexs = []
     for box_index, box in enumerate(parabola_box):
         hei = box[3] - box[1]
-        if hei > 0.8*IMAGE_HEI and hei / (box[2] - box[0]) > 20:#600/60
+        wid = (box[2] - box[0])
+        center = (box[2] + box[0]) / 2
+        if (hei > 0.8*IMAGE_HEI and wid < 25) or (hei > 0.5*IMAGE_HEI and wid < 15):
+            perfect_avg_indexs.append(box_index)
+        elif hei > 0.6*IMAGE_HEI:#600/60
             good_avg_indexs.append(box_index)
-            pass
         elif hei > IMAGE_HEI / 2 and hei / (box[2] - box[0]) > 10:#600/60
             good_min_indexs.append(box_index)
-    if len(good_avg_indexs) > 0:
-        filter_coeffi = coefficient[good_avg_indexs]
-        avg_wid = filter_coeffi[:,4].tolist()
-        good_index = avg_wid.index(np.max(avg_wid))
-        A = np.mean(filter_coeffi[:,0])
-        B = np.mean(filter_coeffi[:,1])
-        good_index = good_avg_indexs[good_index]
-        coefficient[good_index][0] = A
-        coefficient[good_index][1] = B
+    if len(perfect_avg_indexs) > 0:
+        good_index = get_good_index(coefficient, perfect_avg_indexs)
+    elif len(good_avg_indexs) > 0:
+        good_index = get_good_index(coefficient, good_avg_indexs)
     elif len(good_min_indexs) > 0:
         filter_coeffi = coefficient[good_min_indexs]
         avg_wid = filter_coeffi[:,4].tolist()
@@ -550,15 +666,12 @@ def get_good_parabola(coefficient, parabola_box):
         good_box = range(len(coefficient))
         for index in good_box:
             param = coefficient[index]
-            # point1 = get_parabola_y(param, 0)
-            # point2 = get_parabola_y(param, -IMAGE_HEI)
-            # point3 = get_parabola_y(param, -param[1]/(2*param[0]))
-            # point3 = get_parabola_y(param, -IMAGE_HEI/2)
-            # points = [point1, point2, point3]
-            # dis = max(points) - min(points)
             gradient1 = get_gradient(param, -IMAGE_HEI)
             gradient2 = get_gradient(param, 0)
-            if abs(gradient2) > (1./PARABORA_SLOPE_LIMITED):
+
+            hei = box[3] - box[1]
+            wid = box[2] - box[0]
+            if abs(gradient2) > (1./PARABORA_SLOPE_LIMITED) and hei < IMAGE_HEI / 3:
                 continue
             gradient_dalta = abs(gradient1 - gradient2)
 
@@ -575,7 +688,7 @@ def get_good_parabola(coefficient, parabola_box):
     # y = -0.2 * ratio**2 + ratio#y'(x=0) = 1
     y = (3./8)*ratio ** 2 + (5./8)*ratio#(0,0)(1,1)
     good_parabola = coefficient[good_index]
-    good_parabola[0:2] = good_parabola[0:2] * y
+    # good_parabola[0:2] = good_parabola[0:2] * y
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):

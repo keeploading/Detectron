@@ -62,6 +62,7 @@ def get_detectron_ops_lib():
     prefixes = [_CMAKE_INSTALL_PREFIX, sys.prefix, sys.exec_prefix] + sys.path
     # Search for detectron ops lib
     for prefix in prefixes:
+        print ("ops_lib:{}".format(prefix))
         ops_path = os.path.join(prefix, 'lib/libcaffe2_detectron_ops_gpu.so')
         if os.path.exists(ops_path):
             # TODO(ilijar): Switch to using a logger

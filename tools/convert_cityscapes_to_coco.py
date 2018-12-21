@@ -127,7 +127,8 @@ def convert_cityscapes_instance_only(
         'yellow dashed-solid',
         'yellow solid-dashed',
         'boundary',
-        'fork_line'
+        'fork_line',
+        'sidewalk'
     ]
     # category_instancesonly = ['__background__',
     #                           'ego vehicle',

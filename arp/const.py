@@ -24,6 +24,9 @@ class Const:
 
 import const
 
+const.CAMERA_TYPE = 2#0:sh_pc 1:sh_px2 2:us_px2
+const.ROAD_TYPE = 0#0:highway 1:cityroad
+
 const.MPH_TO_MS = 0.44704
 # const.STEER_RATIO = 13.0
 const.STEER_RATIO = 15.3
@@ -37,3 +40,9 @@ const.PORT_GPS_OUT = 11159
 const.PORT_DETECTION = 6701
 const.PORT_IMAGE_OUT = 6702
 const.PORT_DR_OUT = 6704
+
+const.MASK_SAMPLE_STEP = 10
+if const.ROAD_TYPE == 1:
+    const.MASK_SAMPLE_STEP = 5
+
+const.ENABLE_FORK = True
