@@ -2,6 +2,8 @@ import numpy as np
 import time
 from detectron.utils.logging import setup_logging
 from arp.line_detection import lane_wid, get_parabola_by_distance
+from arp.line import Line
+
 #bind with detect spped, later
 AVAILABE_INTERVAL = 1
 SCORE_DEFAULT = 0.2
@@ -58,7 +60,7 @@ class LineFilter(object):
                 x_log.append(int(line['x']))
         logger.info (str(frameId) + " x_log input:" + str(x_log))
     
-        if line_list[0]['type'] == 'boundary':
+        if Line.isBlockLine(line_list[0]['type']):
             # line_list = line_list[line_list[1:]['x'] - line_list[0]['x'] > WID_LANE / 2]
             filter_list = [line_list[0]]
             for line in line_list[1:]:
@@ -68,7 +70,7 @@ class LineFilter(object):
                 else:
                     filter_list.append(line)
             line_list = filter_list
-        if line_list[-1]['type'] == 'boundary':
+        if Line.isBlockLine(line_list[-1]['type']):
             # line_list = line_list[line_list[-1]['x'] - line_list[0:-1]['x'] > WID_LANE / 2]
             filter_list = [line_list[-1]]
             for line in line_list[0:-1][::-1]:

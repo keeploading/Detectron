@@ -128,8 +128,12 @@ show_img = None
 def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
     global predict_time, process_time, show_img
     logger.info('Processing frame: {}'.format(frameId))
+
+    # cv2.imshow("tmplog", im)
+    # cv2.waitKey(0)
     timers = defaultdict(Timer)
     t = time.time()
+    im = im[:, :, ::-1]
     with c2_utils.NamedCudaScope(0):
         cls_boxes, cls_segms, cls_keyps = infer_engine.im_detect_all(
             model, im, None, timers=timers

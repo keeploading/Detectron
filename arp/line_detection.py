@@ -39,6 +39,8 @@ from matplotlib.patches import Polygon
 from scipy import optimize
 import math
 import arp.const as const
+import arp.line as line
+from arp.line import Line
 import time
 import arp.math_utils as math_utils
 
@@ -117,7 +119,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
     if boxes is None or boxes.shape[0] == 0 or max(boxes[:, 4]) < thresh:
         print ("detection not good!")
         #return None
-        return im, mid_im, perspective_img, None
+        return im, mid_im, perspective_img, None, None
 
     if segms is not None and len(segms) > 0:
         masks = mask_util.decode(segms)
@@ -211,15 +213,15 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         middle_y = (max_y + min_y) / 2
         offset_y = max_y - min_y
         offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if curve_type == "fork_line":
+        if curve_type == line.FORK_LINE:
             new_fork_pos = [middle - 10, middle_y] if middle < 0 else [middle + 10, middle_y]
             print ("fork_pos:{}".format(new_fork_pos))
             continue
-        if length < 3:
+        if length < 3 or offset_y < 50:
             print ("number of points not much!" + str(length))
             continue
 
-        if curve_type != "boundary" or curve_type == "fork_line":
+        if curve_type != line.BOUNDARY or curve_type == line.FORK_LINE:
             pass
         else:
             if offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
@@ -235,7 +237,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         classes_param.append(curve_type)
         parabola_box.append([curve_obj["start_x_left"], min_y, curve_obj["end_x_right"], max_y])
 
-        if curve_type == "boundary" and parabolaC < 0:
+        if Line.isBlockLine(curve_type) and parabolaC < 0:
             if (left_boundary is None) or \
                     ((not left_boundary is None) and left_boundary[-2] < parabola_param[-2]):
                 adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
@@ -244,7 +246,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
                 # parabola_param[2] = adjust_x #boundary left edge
                 parabola_param[5] = adjust_x
                 left_boundary = parabola_param
-        if curve_type == "boundary" and parabolaC > 0:
+        if Line.isBlockLine(curve_type) and parabolaC > 0:
             if (right_boundary is None) or \
                     ((not right_boundary is None) and right_boundary[-2] > parabola_param[-2]):
                 adjust_x = (curve_obj["start_x_left"] + curve_obj["end_x_left"]) / 2
@@ -260,7 +262,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
 
     is_fork = (not new_fork_pos is None)
     if not new_fork_pos is None:
-        fork_endtime = time.time() + 3
+        fork_endtime = time.time() + const.INTERVAL_FORK
         fork_pos = new_fork_pos
         is_fork = True
     elif (not fork_endtime is None) and time.time() < fork_endtime:
@@ -269,11 +271,12 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         is_fork = False
 
     is_fork_enable = const.ENABLE_FORK
-    if is_fork and not is_fork_enable:
+    if is_fork and not is_fork_enable and len(parabola_param_np) > 0:
         keep_index = None
         if fork_pos[0] < 0:
             keep_index = parabola_param_np[:, -2] >= fork_pos[0]
         else:
+            print ("parabola_param_np:{}".format(parabola_param_np))
             keep_index = parabola_param_np[:, -2] < fork_pos[0]
         parabola_param_np = parabola_param_np[keep_index]
         classes_param = classes_param[keep_index]
@@ -287,7 +290,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         left = []
         right = []
         for index in range(len(parabola_param_np)):
-            if classes_param[index] != "boundary":
+            if classes_param[index] != line.BOUNDARY:
                 continue
             if parabola_param_np[index][-2] < fork_pos[0]:
                 left.append(parabola_param_np[index])
@@ -649,7 +652,7 @@ def get_good_parabola(coefficient, parabola_box):
         center = (box[2] + box[0]) / 2
         if (hei > 0.8*IMAGE_HEI and wid < 25) or (hei > 0.5*IMAGE_HEI and wid < 15):
             perfect_avg_indexs.append(box_index)
-        elif hei > 0.6*IMAGE_HEI:#600/60
+        elif hei > 0.6*IMAGE_HEI and const.CAMERA_TYPE == 2:#600/60
             good_avg_indexs.append(box_index)
         elif hei > IMAGE_HEI / 2 and hei / (box[2] - box[0]) > 10:#600/60
             good_min_indexs.append(box_index)
@@ -685,10 +688,11 @@ def get_good_parabola(coefficient, parabola_box):
 
     box = parabola_box[good_index]
     ratio = (box[3] - box[1])/ IMAGE_HEI
-    # y = -0.2 * ratio**2 + ratio#y'(x=0) = 1
-    y = (3./8)*ratio ** 2 + (5./8)*ratio#(0,0)(1,1)
     good_parabola = coefficient[good_index]
-    # good_parabola[0:2] = good_parabola[0:2] * y
+
+    if const.CAMERA_SH:
+        y = (3. / 8) * ratio ** 2 + (5. / 8) * ratio  # (0,0)(1,1)
+        good_parabola[0:2] = good_parabola[0:2] * y
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):

@@ -90,7 +90,7 @@ def get_coco_dataset():
         'yellow solid-dashed',
         'boundary',
         'fork_line',
-        'sidewalk'
+        'fork_edge'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds
@@ -112,7 +112,8 @@ def get_line_dataset():
         'yellow dashed-solid',
         'yellow solid-dashed',
         'boundary',
-        'fork_line'
+        'fork_line',
+        'fork_edge'
     ]
     return classes
 
@@ -130,6 +131,7 @@ def isLaneLine(type1, type2):
         'yellow dashed dashed',
         'yellow dashed-solid',
         'yellow solid-dashed',
+        'fork_edge',
     ]
     return (type1 in classes and type2 in classes)
 
@@ -140,7 +142,8 @@ def get_color_dataset(classes):
                   'boundary':[0., 0., 1.],
                   'solid solid':[1., 1., 0.],
                   'dashed dashed':[0., 1., 1.],
-                  'fork_line':[0., 0., 1.],
+                  'fork_line':[1., 0., 1.],
+                  'fork_edge':[1., 1., 1.]
                   }
     if not classes in color_list:
         return None
