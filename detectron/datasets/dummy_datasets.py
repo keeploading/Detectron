@@ -90,7 +90,13 @@ def get_coco_dataset():
         'yellow solid-dashed',
         'boundary',
         'fork_line',
-        'fork_edge'
+        'fork_edge',
+        'arrow_s',
+        'arrow_r',
+        'arrow_l',
+        'arrow_lr',
+        'arrow_inclined_r',
+        'arrow_r_s'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds

@@ -2,7 +2,7 @@ import numpy as np
 import time
 from detectron.utils.logging import setup_logging
 from arp.line_detection import lane_wid, get_parabola_by_distance
-from arp.line import Line
+from arp.lane_line import Line
 
 #bind with detect spped, later
 AVAILABE_INTERVAL = 1
@@ -52,13 +52,31 @@ class LineFilter(object):
         #remove duplicate line
         #=========================================================================================
         line_list = sorted(line_list, key=lambda k:k['x'])
-        print ("source line_list:" + str(line_list))
-    
-        x_log = []
+        print ("source line_list1:" + str(line_list))
+
+        boundary_l = None
+        boundary_r = None
+        if frameId == 11:
+            pass
         for line in line_list:
-            if line['score'] > 0.11:
-                x_log.append(int(line['x']))
-        logger.info (str(frameId) + " x_log input:" + str(x_log))
+            if not Line.isBlockLine(line['type']):
+                continue
+            if line['x'] < 0:
+                if (boundary_l is None) or ((not boundary_l is None) and boundary_l['x'] < line['x']):
+                    boundary_l = line
+            else:
+                if (boundary_r is None) or ((not boundary_r is None) and boundary_r['x'] > line['x']):
+                    boundary_r = line
+
+        inBoundary = []
+        for line in line_list:
+            if (not boundary_l is None) and line['x'] < boundary_l['x']:
+                continue
+            if (not boundary_r is None) and line['x'] > boundary_r['x']:
+                continue
+            inBoundary.append(line)
+        line_list = inBoundary
+        print ("source line_list2:" + str(line_list))
     
         if Line.isBlockLine(line_list[0]['type']):
             # line_list = line_list[line_list[1:]['x'] - line_list[0]['x'] > WID_LANE / 2]
@@ -87,7 +105,7 @@ class LineFilter(object):
             if index == 0:
                 no_near.append(value)
                 continue
-            if value['x'] - no_near[-1]['x'] < WID_LANE / 3:
+            if value['x'] - no_near[-1]['x'] < WID_LANE / 2:
                 if len(no_near) > 1:
                     distance1 = value['x'] - no_near[-2]['x']
                     distance2 = no_near[-1]['x'] - no_near[-2]['x']
@@ -232,11 +250,12 @@ class LineFilter(object):
                 if not pre_line is None:
                     distance_log.append(int(line['x'] - pre_line['x']))
                 pre_line = line
-        print ("distance_log:" + str(distance_log))
-        print ("type_log:" + str(type_log))
+        print ("frame id:{} distance_log:{}".format(frameId, distance_log))
+        print ("frame id:{} predict_x_log:{}".format(frameId, predict_x_log))
+        print ("frame id:{} type_log:{}".format(frameId, type_log))
     
-        x_log = str(x_log)
-        logger.info ("x_log:" + str(x_log) + ((80 - len(x_log)) * " ") + "----> " + str(predict_x_log))
+        # x_log = str(x_log)
+        # logger.info ("x_log:" + str(x_log) + ((80 - len(x_log)) * " ") + "----> " + str(predict_x_log))
         for l in self.cache_list:
             if abs(l['curve_param'][2] - l['x']) > 1:
                 print ("please check frame :" + str(frameId))

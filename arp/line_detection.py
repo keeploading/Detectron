@@ -39,8 +39,8 @@ from matplotlib.patches import Polygon
 from scipy import optimize
 import math
 import arp.const as const
-import arp.line as line
-from arp.line import Line
+import arp.lane_line as lane_line
+from arp.lane_line import Line
 import time
 import arp.math_utils as math_utils
 
@@ -178,13 +178,13 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
                 print ("build_curve_objs time:{}".format(time.time() - t_find_curve) )
 
     print ('loop for build_curve_objs time: {:.3f}s, frame_id:{}'.format(time.time() - t, frame_id))
-    parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug)
+    parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug, frame_id)
     if parabola_params is None:
         return im, mid_im, perspective_img, None, None
     parabola_params, fork_pos = parabola_params
     return im, mid_im, perspective_img, parabola_params, fork_pos
 
-def optimize_parabola(perspective_img, curve_objs, img_debug):
+def optimize_parabola(perspective_img, curve_objs, img_debug, frame_id):
     global fork_pos, fork_endtime
     if len(curve_objs) == 0:
         return
@@ -213,7 +213,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         middle_y = (max_y + min_y) / 2
         offset_y = max_y - min_y
         offset_x = curve_obj["end_x_right"] - curve_obj["start_x_left"]
-        if curve_type == line.FORK_LINE:
+        if curve_type == lane_line.FORK_LINE:
             new_fork_pos = [middle - 10, middle_y] if middle < 0 else [middle + 10, middle_y]
             print ("fork_pos:{}".format(new_fork_pos))
             continue
@@ -221,7 +221,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
             print ("number of points not much!" + str(length))
             continue
 
-        if curve_type != line.BOUNDARY or curve_type == line.FORK_LINE:
+        if curve_type != lane_line.BOUNDARY or curve_type == lane_line.FORK_LINE:
             pass
         else:
             if offset_x > lane_wid/2 and float(offset_y) / offset_x < BOX_SLOPE_LIMITED:
@@ -240,7 +240,8 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         if Line.isBlockLine(curve_type) and parabolaC < 0:
             if (left_boundary is None) or \
                     ((not left_boundary is None) and left_boundary[-2] < parabola_param[-2]):
-                adjust_x = (curve_obj["end_x_right"] + curve_obj["end_x_left"]) / 2
+                adjust_x = (curve_obj["start_x_right"] + curve_obj["end_x_right"]) / 2
+                # adjust_x = curve_obj["end_x_right"] - curve_obj["end_x_left"]
                 # adjust_x = curve_obj["end_x_right"]
                 # parabola_param[2] += (adjust_x - parabola_param[-1]) #boundary left edge
                 # parabola_param[2] = adjust_x #boundary left edge
@@ -250,8 +251,10 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
             if (right_boundary is None) or \
                     ((not right_boundary is None) and right_boundary[-2] > parabola_param[-2]):
                 adjust_x = (curve_obj["start_x_left"] + curve_obj["end_x_left"]) / 2
+                # adjust_x = curve_obj["start_x_right"] - curve_obj["start_x_left"]
+                # adjust_x = curve_obj["start_x_left"]
                 # parabola_param[2] += (adjust_x - parabola_param[-1])
-                # parabola_param[2] = adjust_x
+                #parabola_param[2] = adjust_x
                 parabola_param[5] = adjust_x
                 right_boundary = parabola_param
     parabola_param_np = np.array(parabola_params)
@@ -290,7 +293,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
         left = []
         right = []
         for index in range(len(parabola_param_np)):
-            if classes_param[index] != line.BOUNDARY:
+            if classes_param[index] != lane_line.BOUNDARY:
                 continue
             if parabola_param_np[index][-2] < fork_pos[0]:
                 left.append(parabola_param_np[index])
@@ -334,6 +337,10 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
     for parabola_param_np, classes_param, parabola_box, boundary in zip(parabola_param_list, classes_param_list, parabola_box_list, boundarys):
         if not boundary[0] is None:#left
             keep_index = parabola_param_np[:,2] >= boundary[0][2]
+            log1 = np.round(parabola_param_np, decimals=1)
+            log2 = str(np.round(boundary[0], decimals=1))
+            print ("classes_param parabola_param_np:{} ---------------- boundary:{}".format(str(log1), str(log2)))
+            print ("{} classes_param:{} ---> keep_index:{}".format(frame_id, classes_param, keep_index))
             parabola_param_np = parabola_param_np[keep_index]
             classes_param = classes_param[keep_index]
             parabola_box = parabola_box[keep_index]
@@ -366,7 +373,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug):
                 y = get_parabola_y(good_parabola, parabola[-1])
                 relative_point = (parabola[-1], y)
                 relative_predict = (parabola[-1], get_parabola_y(parabola[0:3], parabola[-1]))
-                predict_parabola = get_parabola_by_distance(good_parabola, relative_predict[1] - y)
+                predict_parabola = get_parabola_by_distance(good_parabola, parabola[5] - y)
                 if predict_parabola is None:
                     continue
                 parabola_param_np[index][0:3] = predict_parabola
@@ -478,7 +485,6 @@ def get_closest_points(points, y):
             return [points[index_close], points[index_close + 1]]
 
 def add2curve(curve_objs, point, type, score):
-    print ("add2curve type:{}".format(type))
     matched = False
     for i in range(len(curve_objs)):
         obj = curve_objs[i]
@@ -486,10 +492,10 @@ def add2curve(curve_objs, point, type, score):
         distanceX = None
         p1 = points[0]
         p2 = points[-1]
-        distanceX = abs(p1[0] - point[0])
+        distanceX = min(abs(p1[0] - point[0]), abs(p2[0] - point[0]))
         distanceY1 = p1[1] - point[1]
         distanceY2 = p2[1] - point[1]
-        if p1[0] != p2[0]:
+        if p1[0] != p2[0] and abs(p1[0] - p2[0] > IMAGE_HEI / 6):
             # p1, p2 = get_closest_points(points, point[1])
             param = math_utils.line_param(p1[1], p1[0], p2[1], p2[0])#right-down to down-right
             distanceX = abs(point[0]- (param[0] * point[1] + param[1]))
@@ -497,12 +503,15 @@ def add2curve(curve_objs, point, type, score):
             distanceY2 = p2[1] - point[1]
 
         if distanceY1 < 0 and distanceY2 > 0:
-            continue
+            if distanceX < 10:
+                return
+            else:
+                continue
         if abs(distanceY1) > IMAGE_HEI / 3 and abs(distanceY2) > IMAGE_HEI / 3:
+            # print ("distanceY1:{}, distanceY2:{}, reference:{}".format(distanceY1, distanceY2, IMAGE_HEI / 3))
             continue
 
         if distanceX < 20 and (obj["classes"] == type or dummy_datasets.isLaneLine(obj["classes"], type)) :
-            print ("add2curve1 type1:{}, type2:{}".format(obj["classes"], type))
             points.append(point)
             obj["mileage"] += (point[3] - point[2])
             if obj["start_x_left"] > point[2]:
@@ -516,12 +525,29 @@ def add2curve(curve_objs, point, type, score):
             #process share obj
             curve_objs[i] = obj
             matched = True
+
+
     if matched:
+        if const.CLUSTER_DEBUG:
+            debug_im = np.zeros((IMAGE_HEI, IMAGE_WID, 3), np.uint8)
+            for _, pts in enumerate(curve_objs):
+                debug_points = pts["points"]
+                for p in debug_points:
+                    cv2.circle(debug_im, (int(p[0] + IMAGE_WID / 2), int(p[1] + IMAGE_HEI)), 5, tuple(const.DEBUG_CORLOR[_]),
+                               thickness=5)
+            cv2.imwrite("/media/administrator/deeplearning/detectron/debug/{}.png".format(int(round(time.time() * 1000))), debug_im)
         return
     curve = {"points":[point], "start_x_left":point[2], "end_x_right":point[3], "start_x_right":point[2],
              "end_x_left":point[3], "classes": type, "score":score, "mileage": point[3] - point[2]}
     curve_objs.append(curve)
 
+    if const.CLUSTER_DEBUG:
+        debug_im = np.zeros((IMAGE_HEI, IMAGE_WID, 3), np.uint8)
+        for _, pts in enumerate(curve_objs):
+            debug_points = pts["points"]
+            for p in debug_points:
+                cv2.circle(debug_im, (int(p[0] + IMAGE_WID / 2), int(p[1] + IMAGE_HEI)), 5, tuple(const.DEBUG_CORLOR[_]), thickness=5)
+        cv2.imwrite("/media/administrator/deeplearning/detectron/debug/{}.png".format(int(round(time.time() * 1000))), debug_im)
 def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
     line_class = dummy_datasets.get_line_dataset()
     top_idx = None
@@ -550,7 +576,8 @@ def build_curve_objs(curve_objs, mask, classs_type, score, img_debug):
 
         # top_idx = top_idx[::10]
         top_idx = top_idx[(top_idx[:,0] > 0) & (top_idx[:,0] < IMAGE_WID) & (top_idx[:,1] > 0) & (top_idx[:,1] < IMAGE_HEI)]
-        # print ("top_idx:" + str(top_idx))
+        # cv2.imshow('log1', mask * 255)
+        # cv2.waitKey(10)
         # print('warpPerspective time: {:.3f}s'.format(time.time() - t))
         t = time.time()
         if len(top_idx) > 10:

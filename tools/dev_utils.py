@@ -8,9 +8,9 @@ import os
 import time
 
 def rename():
-    path = "/media/administrator/xhpan/ros_img_label_12_12_16/choose/"
+    path = "/media/administrator/deeplearning/detectron/video_image/choose2label/"
     for filename in os.listdir(path):
-        newname = "us_{}_000002_leftImg8bit.png".format(filename[:-4])
+        newname = "sh_{}_000002_leftImg8bit.png".format(filename[:-4])
         print (filename + " -> " + newname)
         os.rename(path + filename, path + newname)
 

@@ -128,7 +128,13 @@ def convert_cityscapes_instance_only(
         'yellow solid-dashed',
         'boundary',
         'fork_line',
-        'fork_edge'
+        'fork_edge',
+        'arrow_s',
+        'arrow_r',
+        'arrow_l',
+        'arrow_lr',
+        'arrow_inclined_r',
+        'arrow_r_s'
     ]
     # category_instancesonly = ['__background__',
     #                           'ego vehicle',

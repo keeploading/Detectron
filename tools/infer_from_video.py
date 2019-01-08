@@ -65,12 +65,14 @@ from arp.fusion_particle_line import FusionParticle
 from arp.detection_filter import LineFilter
 from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
 
-CUT_OFFSET_IMG = [277, 426]
+CUT_OFFSET_IMG = np.array([277, 426])
 if const.CAMERA_TYPE == 1:
-    CUT_OFFSET_IMG = [302, 451]
+    CUT_OFFSET_IMG = np.array([302, 451])
 elif const.CAMERA_TYPE == 2:
-    CUT_OFFSET_IMG = [330, 478]
+    CUT_OFFSET_IMG = np.array([330, 478])
 
+# if scale_size:
+#     CUT_OFFSET_IMG = (CUT_OFFSET_IMG/2).astype(np.int)
 
 c2_utils.import_detectron_ops()
 
@@ -139,7 +141,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
             model, im, None, timers=timers
         )
     predict_time.append(time.time() - t)
-    # logger.info('Inference time: {:.3f}s'.format(time.time() - t))
+    logger.info('Inference time: {:.3f}s'.format(time.time() - t))
     logger.info('predict_time: {:.3f}s'.format(np.mean(np.array(predict_time))))
     # for k, v in timers.items():
     #     logger.info(' | {}: {:.3f}s'.format(k, v.average_time))
@@ -210,7 +212,7 @@ def drawParabola(image, line_param, type, color):
     parabola_im = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
     if type in ["yellow dashed", "yellow solid", "yellow solid solid", "yellow dashed dashed", "yellow dashed-solid", "yellow solid-dashed"]:
         cv2.polylines(parabola_im, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, (0, 200, 200), thickness=2)
-    elif type == "boundary":
+    elif type in ["boundary", "fork_edge"]:
         cv2.polylines(parabola_im, np.int32([np.vstack((points[:, 0], points[:, 1])).T]), False, (0, 0, 200), thickness=4)
     else:
         cv2.polylines(parabola_im, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, color, thickness=2)
@@ -246,7 +248,7 @@ def add2MsgQueue(result, frameId, fork_x, img_debug):
             # line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[4]}
             line_info = {'curve_param':line_param[0:3].tolist(), 'type':line_type, 'score':line_param[3], 'x':line_param[2], 'middle':line_param[5]}
             line_list.append(line_info)
-        line_list, cache_list = line_filter[index].get_predict_list(line_list, frameId, fork_x[0] if is_fork else None, index == 0)
+        line_list, cache_list = line_filter[index].get_predict_list(line_list, frameId, fork_x[0] if is_fork else None, index==0)
         full_line_list.append(line_list)
         full_cache_list.append(cache_list)
 
@@ -360,6 +362,8 @@ def dr_filter(line_list):
 left_fork_filter = LineFilter()
 right_fork_filter = LineFilter()
 def main(args):
+    global CUT_OFFSET_IMG
+
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
     cfg.NUM_GPUS = 1
@@ -433,14 +437,14 @@ def main(args):
             if scale_size:
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
-                origin_im = np.copy(img_np)
-            else:
-                origin_im = np.copy(img_np)
+            origin_im = np.copy(img_np)
 
             img_np = img_np[CUT_OFFSET_IMG[0]:CUT_OFFSET_IMG[1], 0:IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
+
+    raw_input('press Enter to exit...')
 
 
 def show_debug_img():

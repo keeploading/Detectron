@@ -44,6 +44,13 @@ const.PORT_DR_OUT = 6704
 const.MASK_SAMPLE_STEP = 10
 const.ENABLE_FORK = False
 const.INTERVAL_FORK = 1
+const.CLUSTER_DEBUG = False
+const.CALE_ZOOM = True
+const.DEBUG_CORLOR = [[255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0], [255, 0, 255],
+                           [0, 255, 255], [100, 100, 100], [100, 0, 0], [0, 100, 0], [0, 0, 100], [100, 100, 0],
+                           [100, 0, 100], [0, 100, 100],
+                           [200, 200, 200], [200, 0, 0], [0, 200, 0], [0, 0, 200], [200, 200, 0], [200, 0, 200],
+                           [0, 200, 200]]
 
 
 if const.ROAD_TYPE == 1:
