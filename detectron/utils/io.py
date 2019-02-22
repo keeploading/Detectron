@@ -51,9 +51,9 @@ def cache_url(url_or_file, cache_dir):
         return url_or_file
 
     url = url_or_file
-    assert url.startswith(_DETECTRON_S3_BASE_URL), \
-        ('Detectron only automatically caches URLs in the Detectron S3 '
-         'bucket: {}').format(_DETECTRON_S3_BASE_URL)
+    # assert url.startswith(_DETECTRON_S3_BASE_URL), \
+    #     ('Detectron only automatically caches URLs in the Detectron S3 '
+    #      'bucket: {}').format(_DETECTRON_S3_BASE_URL)
 
     cache_file_path = url.replace(_DETECTRON_S3_BASE_URL, cache_dir)
     if os.path.exists(cache_file_path):

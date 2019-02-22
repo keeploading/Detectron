@@ -1,7 +1,7 @@
 MODEL:
   TYPE: generalized_rcnn
   CONV_BODY: FPN.add_fpn_ResNet50_conv5_body
-  NUM_CLASSES: 24
+  NUM_CLASSES: 25
   FASTER_RCNN: True
   MASK_ON: True
 NUM_GPUS: 1
@@ -33,7 +33,7 @@ TRAIN:
 #  WEIGHTS: ./output/cs_fpn/base/train/cs_2017_train:cs_2017_val/generalized_rcnn/model_final.pkl
 #  DATASETS: ('coco_2014_train', 'coco_2014_valminusminival')
 
-  WEIGHTS: https://s3-us-west-2.amazonaws.com/detectron/35858933/12_2017_baselines/e2e_mask_rcnn_R-50-FPN_1x.yaml.01_48_14.DzEQe4wC/output/train/coco_2014_train%3Acoco_2014_valminusminival/generalized_rcnn/model_final.pkl
+  WEIGHTS: https://dl.fbaipublicfiles.com/detectron/35858933/12_2017_baselines/e2e_mask_rcnn_R-50-FPN_1x.yaml.01_48_14.DzEQe4wC/output/train/coco_2014_train%3Acoco_2014_valminusminival/generalized_rcnn/model_final.pkl
 #  WEIGHTS: https://s3-us-west-2.amazonaws.com/detectron/ImageNetPretrained/MSRA/R-50.pkl
 #  WEIGHTS: /media/administrator/deeplearning/project/detectron/output/cs_output_fpn/train_nocar/cs_2017_train:cs_2017_val/generalized_rcnn/model_final.pkl
   DATASETS: ('cs_2017_train', 'cs_2017_val')

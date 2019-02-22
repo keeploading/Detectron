@@ -27,6 +27,7 @@ import logging
 import numpy as np
 import smtplib
 import sys
+import time
 
 # Print lower precision floating point values than default FLOAT_REPR
 json.encoder.FLOAT_REPR = lambda o: format(o, '.6f')
@@ -76,6 +77,9 @@ def setup_logging(name):
     # Manually clear root loggers to prevent any module that may have called
     # logging.basicConfig() from blocking our logging setup
     logging.root.handlers = []
-    logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
+    # logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
+    fileNow = "./output/train-log{}-{}.log".format(time.strftime('%Y-%m-%d', time.localtime(time.time())), int(time.time()))
+    logging.basicConfig(filename=fileNow, level=logging.INFO, format=FORMAT, stream=sys.stdout)
+
     logger = logging.getLogger(name)
     return logger

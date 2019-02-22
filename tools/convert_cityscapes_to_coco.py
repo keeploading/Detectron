@@ -134,7 +134,8 @@ def convert_cityscapes_instance_only(
         'arrow_l',
         'arrow_lr',
         'arrow_inclined_r',
-        'arrow_r_s'
+        'arrow_r_s',
+        'sidewalk'
     ]
     # category_instancesonly = ['__background__',
     #                           'ego vehicle',

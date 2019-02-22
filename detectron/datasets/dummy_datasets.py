@@ -96,7 +96,8 @@ def get_coco_dataset():
         'arrow_l',
         'arrow_lr',
         'arrow_inclined_r',
-        'arrow_r_s'
+        'arrow_r_s',
+        'sidewalk'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds

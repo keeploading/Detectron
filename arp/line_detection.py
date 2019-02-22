@@ -336,7 +336,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug, frame_id):
     ret_parabola = []
     for parabola_param_np, classes_param, parabola_box, boundary in zip(parabola_param_list, classes_param_list, parabola_box_list, boundarys):
         if not boundary[0] is None:#left
-            keep_index = parabola_param_np[:,2] >= boundary[0][2]
+            keep_index = parabola_param_np[:,2] >= boundary[0][2] - 20
             log1 = np.round(parabola_param_np, decimals=1)
             log2 = str(np.round(boundary[0], decimals=1))
             print ("classes_param parabola_param_np:{} ---------------- boundary:{}".format(str(log1), str(log2)))
@@ -345,7 +345,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug, frame_id):
             classes_param = classes_param[keep_index]
             parabola_box = parabola_box[keep_index]
         if not boundary[1] is None:#right
-            keep_index = parabola_param_np[:,2] <= boundary[1][2]
+            keep_index = parabola_param_np[:,2] <= boundary[1][2] + 20
             parabola_param_np = parabola_param_np[keep_index]
             classes_param = classes_param[keep_index]
             parabola_box = parabola_box[keep_index]
