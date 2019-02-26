@@ -56,7 +56,7 @@ is_px2 = (const.CAMERA_TYPE == 1)
 
 IMAGE_WID = 960
 IMAGE_HEI = 604
-source_arr = np.float32([[918,841],[1092,841],[1103,874],[903,874]])
+source_arr = np.float32([[916,841],[1091,841],[1103,874],[903,874]])
 source_arr[:,1] = source_arr[:,1] - 604
 if const.CAMERA_TYPE == 1:
     print ("is_px2 is true")
@@ -229,7 +229,7 @@ def optimize_parabola(perspective_img, curve_objs, img_debug, frame_id):
             if curve_obj["mileage"] < 30:
                 continue
         parabola_A, parabolaB, parabolaC = optimize.curve_fit(math_utils.parabola2, curve[:, 1], curve[:, 0])[0]
-        belive = length + 300. / (curve_obj["mileage"]/length)
+        belive = length + 200. / (curve_obj["mileage"]/length)
         # print ("mileage:" + str(curve_obj["mileage"]/length))
         parabola_param = [parabola_A, parabolaB, parabolaC, curve_obj["score"], belive, middle, min_y + offset_y/2]#, curve_obj["classes"]
         print ("parabola_param:{}".format(parabola_param))

@@ -14,6 +14,7 @@ import cityscapesscripts.evaluation.instances2dict as cs
 
 import detectron.utils.segms as segms_util
 import detectron.utils.boxes as bboxs_util
+import random
 
 
 def parse_args():
@@ -135,6 +136,7 @@ def convert_cityscapes_instance_only(
         'arrow_lr',
         'arrow_inclined_r',
         'arrow_r_s',
+        'arrow_l_s',
         'sidewalk'
     ]
     # category_instancesonly = ['__background__',
@@ -179,62 +181,71 @@ def convert_cityscapes_instance_only(
         images = []
         annotations = []
         ann_dir = os.path.join(data_dir, ann_dir)
+        file_list = []
         for root, sub_dirs, files in os.walk(ann_dir):
             for filename in files:
-                if filename.endswith(ends_in):
-                    if len(images) % 50 == 0:
-                        print("Processed %s images, %s annotations" % (
-                            len(images), len(annotations)))
-                    json_ann = json.load(open(os.path.join(root, filename)))
-                    image = {}
-                    image['id'] = img_id
-                    img_id += 1
+                file_list.append([root, filename])
+        random.shuffle(file_list)
 
-                    image['width'] = json_ann['imgWidth']
-                    image['height'] = json_ann['imgHeight']
-                    sub_file_name = filename.split('_')
-                    image['file_name'] = os.path.join(sub_file_name[0], '_'.join(sub_file_name[:-2]) + '_leftImg8bit.png')
-                    image['seg_file_name'] = '_'.join(filename.split('_')[:-1]) + '_instanceIds.png'
-                    images.append(image)
+        for file_item in file_list:
+            root = file_item[0]
+            filename = file_item[1]
+            if filename.endswith(ends_in):
+                if len(images) % 50 == 0:
+                    print("Processed %s images, %s annotations" % (
+                        len(images), len(annotations)))
+                json_ann = json.load(open(os.path.join(root, filename)))
+                image = {}
+                image['id'] = img_id
+                img_id += 1
 
-                    fullname = os.path.join(root, image['seg_file_name'])
-                    print ("fullname:" + fullname)
-                    objects = cs.instances2dict_with_polygons(
-                        [fullname], verbose=False)[fullname]
+                image['width'] = json_ann['imgWidth']
+                image['height'] = json_ann['imgHeight']
+                sub_file_name = filename.split('_')
+                image['file_name'] = os.path.join(sub_file_name[0], '_'.join(sub_file_name[:-2]) + '_leftImg8bit.png')
+                image['seg_file_name'] = '_'.join(filename.split('_')[:-1]) + '_instanceIds.png'
+                images.append(image)
 
-                    for object_cls in objects:
-                        # if object_cls not in add_instancesonly:
-                        #     continue
+                fullname = os.path.join(root, image['seg_file_name'])
+                print("fullname:" + fullname)
+                objects = cs.instances2dict_with_polygons(
+                    [fullname], verbose=False)[fullname]
 
-                        if object_cls not in category_instancesonly:
+                for object_cls in objects:
+                    # if object_cls not in add_instancesonly:
+                    #     continue
+
+                    if object_cls not in category_instancesonly:
+                        continue  # skip non-instance categories
+
+                    for obj in objects[object_cls]:
+                        if obj['contours'] == []:
+                            print('Warning: empty contours.')
                             continue  # skip non-instance categories
 
-                        for obj in objects[object_cls]:
-                            if obj['contours'] == []:
-                                print('Warning: empty contours.')
-                                continue  # skip non-instance categories
+                        index = category_instancesonly.index(object_cls)  # + 184
+                        good_area = [p for p in obj['contours'] if len(p) > 4]
 
-                            index = category_instancesonly.index(object_cls)  # + 184
-                            good_area = [p for p in obj['contours'] if len(p) > 4]
+                        if len(good_area) == 0:
+                            print('Warning: invalid contours.')
+                            continue  # skip non-instance categories
 
-                            if len(good_area) == 0:
-                                print('Warning: invalid contours.')
-                                continue  # skip non-instance categories
+                        ann = {}
+                        ann['id'] = ann_id
+                        ann_id += 1
+                        ann['image_id'] = image['id']
+                        ann['segmentation'] = good_area
 
-                            ann = {}
-                            ann['id'] = ann_id
-                            ann_id += 1
-                            ann['image_id'] = image['id']
-                            ann['segmentation'] = good_area
+                        ann['category_id'] = index
+                        ann['iscrowd'] = 0
+                        ann['area'] = obj['pixelCount']
+                        ann['bbox'] = bboxs_util.xyxy_to_xywh(
+                            segms_util.polys_to_boxes(
+                                [ann['segmentation']])).tolist()[0]
 
-                            ann['category_id'] = index
-                            ann['iscrowd'] = 0
-                            ann['area'] = obj['pixelCount']
-                            ann['bbox'] = bboxs_util.xyxy_to_xywh(
-                                segms_util.polys_to_boxes(
-                                    [ann['segmentation']])).tolist()[0]
+                        annotations.append(ann)
 
-                            annotations.append(ann)
+
 
         ann_dict['images'] = images
 
