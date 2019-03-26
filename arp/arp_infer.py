@@ -51,28 +51,17 @@ from detectron.utils.timer import Timer
 import detectron.core.test_engine as infer_engine
 import detectron.datasets.dummy_datasets as dummy_datasets
 import detectron.utils.c2 as c2_utils
-import detectron.utils.vis as vis_utils
-import arp.line_detection as detection
+# import arp.line_detection as detection
 from multiprocessing import Process, Queue
 from Queue import Empty
 import json
 import math
 import copy
-from arp.line_detection import lane_wid
 import arp.const as const
 from arp.fusion_kalman import Fusion
 from arp.fusion_particle_line import FusionParticle
 from arp.detection_filter import LineFilter
-from arp.line_detection import dist, mtx, IMAGE_WID, IMAGE_HEI, scale_size, is_px2, H_OP
-
-CUT_OFFSET_IMG = np.array([277, 426])
-if const.CAMERA_TYPE == 1:
-    CUT_OFFSET_IMG = np.array([302, 451])
-elif const.CAMERA_TYPE == 2:
-    CUT_OFFSET_IMG = np.array([330, 478])
-
-# if scale_size:
-#     CUT_OFFSET_IMG = (CUT_OFFSET_IMG/2).astype(np.int)
+from arp.line_extractor import LineExtractor
 
 c2_utils.import_detectron_ops()
 
@@ -81,6 +70,8 @@ c2_utils.import_detectron_ops()
 cv2.ocl.setUseOpenCL(False)
 g_fusion_filter = None
 g_particle_filter = None
+
+extractor = LineExtractor()
 
 def parse_args():
     parser = argparse.ArgumentParser(description='End-to-end inference')
@@ -155,7 +146,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
 
     t = time.time()
     img_debug = True
-    ret = detection.get_detection_line(
+    ret = extractor.get_detection_line(
         im,
         cls_boxes,
         cls_segms,
@@ -192,26 +183,26 @@ def drawParticles(image, particles):
     for index, p in enumerate(particles):
         if abs(p.x) > 100:
             continue
-        meter_scale = (3.5/lane_wid)
+        meter_scale = (3.5/extractor.lane_wid)
         # histogram[index][0] = index + 100#int(p.x) / meter_scale
         histogram[int(p.x / meter_scale) + 150][1] += 1
-    cv2.polylines(image, np.int32([np.vstack((histogram[:,0] + IMAGE_WID/2 - 150, histogram[:,1])).T]), False, (0, 0, 250), thickness=1)
+    cv2.polylines(image, np.int32([np.vstack((histogram[:,0] + extractor.IMAGE_WID/2 - 150, histogram[:,1])).T]), False, (0, 0, 250), thickness=1)
 
 def drawParabola(image, line_param, type, color):
     points = []
     for x in range(-800, 30, 10):
         points.append([line_param[0] * x**2 + line_param[1] * x + line_param[2], x])
     points = np.array(points)
-    points[:,0] = points[:,0] + IMAGE_WID/2
-    points[:,1] = points[:,1] + IMAGE_HEI
-    points = cv2.perspectiveTransform(np.array([points], dtype='float32'), np.array(H_OP))
+    points[:,0] = points[:,0] + extractor.IMAGE_WID/2
+    points[:,1] = points[:,1] + extractor.IMAGE_HEI
+    points = cv2.perspectiveTransform(np.array([points], dtype='float32'), np.array(extractor.H_OP))
 
-    offset_y = CUT_OFFSET_IMG[0]
+    offset_y = extractor.CUT_OFFSET_IMG[0]
     points = points[0]
     points[:,1] = points[:,1] + offset_y
     # print ("drawParabola points:" + str(points))
 
-    parabola_im = np.zeros((IMAGE_HEI,IMAGE_WID,3), np.uint8)
+    parabola_im = np.zeros((extractor.IMAGE_HEI,extractor.IMAGE_WID,3), np.uint8)
     if type in ["yellow dashed", "yellow solid", "yellow solid solid", "yellow dashed dashed", "yellow dashed-solid", "yellow solid-dashed"]:
         cv2.polylines(parabola_im, np.int32([np.vstack((points[:,0], points[:,1])).T]), False, (0, 200, 200), thickness=2)
     elif type in ["boundary", "fork_edge", "handrail"]:
@@ -273,10 +264,10 @@ def get_right_parabola(line_list):
     for index, line in enumerate(line_list):
         if line["curve_param"][2] > 0:
             ret = line["curve_param"][:]
-            ret[2] = ret[2] % lane_wid
+            ret[2] = ret[2] % extractor.lane_wid
             return ret
     ret = line_list[-1]["curve_param"][:]
-    ret[2] = ret[2] % lane_wid
+    ret[2] = ret[2] % extractor.lane_wid
     return ret
 
 def particle_filter(line_list):
@@ -284,7 +275,7 @@ def particle_filter(line_list):
     if line_list is None or len(line_list) == 0:
         return None
     param = get_right_parabola(line_list)
-    meter_scale = (3.5/lane_wid)
+    meter_scale = (3.5/extractor.lane_wid)
     x = param[2] * meter_scale
     if g_particle_filter is None or (time.time() - g_particle_filter.timestamp > 1):
         g_particle_filter = FusionParticle(x, g_dr_queue)
@@ -309,7 +300,7 @@ def dr_filter(line_list):
         return None
     global g_fusion_filter
     param = get_right_parabola(line_list)
-    meter_scale = (3.5/lane_wid)
+    meter_scale = (3.5/extractor.lane_wid)
     x = param[2] * meter_scale
     avg_speed = []
     avg_angle = []
@@ -364,7 +355,6 @@ def dr_filter(line_list):
 left_fork_filter = LineFilter()
 right_fork_filter = LineFilter()
 def main(args):
-    global CUT_OFFSET_IMG
 
     logger = logging.getLogger(__name__)
     merge_cfg_from_file(args.cfg)
@@ -437,12 +427,12 @@ def main(args):
             print("time:" + str(t))
             time.sleep(0.001)
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
-            if scale_size:
+            if extractor.scale_size:
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
             origin_im = np.copy(img_np)
 
-            img_np = img_np[CUT_OFFSET_IMG[0]:CUT_OFFSET_IMG[1], 0:IMAGE_WID]
+            img_np = img_np[extractor.CUT_OFFSET_IMG[0]:extractor.CUT_OFFSET_IMG[1], 0:extractor.IMAGE_WID]
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
@@ -458,15 +448,15 @@ def show_debug_img():
             origin_im, im, mid_im, top_im, line_list_array, cache_list_array, filter_list_array, frameId, fork_pos = message
 
             half_size = (int(im.shape[1] / 2), int(im.shape[0] / 2))
-            if IMAGE_WID > 960:
+            if extractor.IMAGE_WID > 960:
                 im = cv2.resize(im, half_size)
                 top_im = cv2.resize(top_im, (960, 604))
 
                 mid_im = cv2.resize(mid_im, half_size)
-                # mid_im = mid_im[604:902, 0:IMAGE_WID]
-                # mid_im = cv2.resize(mid_im, (int(IMAGE_WID / 2), 150))
+                # mid_im = mid_im[604:902, 0:extractor.IMAGE_WID]
+                # mid_im = cv2.resize(mid_im, (int(extractor.IMAGE_WID / 2), 150))
             else:
-                # mid_im = mid_im[302:451, 0:IMAGE_WID]
+                # mid_im = mid_im[302:451, 0:extractor.IMAGE_WID]
                 pass
 
             if (not line_list_array is None) and (not cache_list_array is None):
@@ -476,7 +466,7 @@ def show_debug_img():
                 for line_list, cache_list, filter_list, color in zip(line_list_array, cache_list_array, filter_list_array, line_color):
                     x_pos = []
                     x_pos_11 = []
-                    prob_wid = IMAGE_WID
+                    prob_wid = extractor.IMAGE_WID
                     if prob_wid > 960:
                         prob_wid = prob_wid / 2
                     for i in range(-int(prob_wid / 2), int(prob_wid / 2), 1):
@@ -496,7 +486,7 @@ def show_debug_img():
                                 matched_y_11 = int(200 * l['score'] - dis * dis)
                         x_pos.append([i + int(prob_wid / 2), matched_y])
                         x_pos_11.append([i + int(prob_wid / 2), matched_y_11])
-                    # h = np.zeros((100, IMAGE_WID, 3))
+                    # h = np.zeros((100, extractor.IMAGE_WID, 3))
                     cv2.polylines(origin_im, [np.array(x_pos)], False, (0, 255, 0))
                     cv2.polylines(origin_im, [np.array(x_pos_11)], False, (0, 0, 255))
                     # origin_im = np.flipud(origin_im)

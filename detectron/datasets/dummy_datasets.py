@@ -46,33 +46,6 @@ def get_coco_dataset():
     # ]
     # classes = ['__background__', 'lane']
     #
-    # classes = ['__background__',
-    #     'line_1',
-    #     'line_2',
-    #     'line_3',
-    #     'line_4',
-    #     'line_5',
-    #     'line_6',
-    #     'line_7',
-    #     'line_8',
-    #     'road_1',
-    #     'road_12',
-    #     'road_2',
-    #     'road_23',
-    #     'road_3',
-    #     'road_34',
-    #     'road_4',
-    #     'road_45',
-    #     'road_5',
-    #     'road_56',
-    #     'road_6',
-    #     'road_67',
-    #     'road_7',
-    #     'road_78',
-    #     'road_8',
-    #     'car',
-    #     'boundary'
-    # ]
     classes = ['__background__',
         'guard rail',
         'car',
@@ -98,7 +71,8 @@ def get_coco_dataset():
         'arrow_inclined_r',
         'arrow_r_s',
         'arrow_l_s',
-        'sidewalk'
+        'sidewalk',
+        'handrail'
     ]
     ds.classes = {i: name for i, name in enumerate(classes)}
     return ds
@@ -121,7 +95,8 @@ def get_line_dataset():
         'yellow solid-dashed',
         'boundary',
         'fork_line',
-        'fork_edge'
+        'fork_edge',
+        'handrail'
     ]
     return classes
 
@@ -154,7 +129,7 @@ def get_color_dataset(classes):
                   'fork_edge':[1., 1., 1.]
                   }
     if not classes in color_list:
-        return None
+        return np.array([0.5, 0.5, 0.5]) *255;
     return np.array(color_list[classes]) *255
 
 

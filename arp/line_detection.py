@@ -78,7 +78,7 @@ scale_h = 0.025
 scale_w = 0.28#1/3.5
 mileage_trigger = 30 if const.ROAD_TYPE == 0 else 20
 if const.CAMERA_TYPE == 2:
-    scale_h = 0.1 if const.ROAD_TYPE == 0 else 0.5
+    scale_h = 0.1 if const.ROAD_TYPE == 0 else 0.8
     scale_w = 1
 
 offset_x = lane_wid * scale_w / 2
@@ -141,6 +141,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
 
     t = time.time()
     color_index = 0
+    has_sidewalk = False
     for i in sorted_inds:
         bbox = boxes[i, :4]
         score = boxes[i, -1]
@@ -162,6 +163,8 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
             color_mask = color_list[mask_color_id % len(color_list), 0:3]
             mask_color_id += 1
             type = ' '.join(class_str.split(' ')[:-1])
+            if type == "sidewalk":
+                has_sidewalk = True
             color = dummy_datasets.get_color_dataset(type)
             # if not color is None:
             #     color_mask = color
@@ -179,7 +182,7 @@ def get_detection_line(im, boxes, segms=None, keypoints=None, thresh=0.9, kp_thr
 
     print ('loop for build_curve_objs time: {:.3f}s, frame_id:{}'.format(time.time() - t, frame_id))
     parabola_params = optimize_parabola(perspective_img, curve_objs, img_debug, frame_id)
-    if parabola_params is None:
+    if parabola_params is None or has_sidewalk:
         return im, mid_im, perspective_img, None, None
     parabola_params, fork_pos = parabola_params
     return im, mid_im, perspective_img, parabola_params, fork_pos
@@ -714,12 +717,13 @@ def get_good_parabola(coefficient, parabola_box):
             return None
 
     box = parabola_box[good_index]
-    ratio = (box[3] - box[1])/ IMAGE_HEI
     good_parabola = coefficient[good_index]
-
-    if const.CAMERA_SH:
-        y = (3. / 8) * ratio ** 2 + (5. / 8) * ratio  # (0,0)(1,1)
-        good_parabola[0:2] = good_parabola[0:2] * y
+    if box[3] - box[1] < 0.3 * IMAGE_HEI and box[2] - box[0] < 20:
+        good_parabola[0:2] = good_parabola[0:2] * 0.1
+    # elif const.CAMERA_SH:
+    #     ratio = (box[3] - box[1])/ IMAGE_HEI
+    #     y = (3. / 8) * ratio ** 2 + (5. / 8) * ratio  # (0,0)(1,1)
+    #     good_parabola[0:2] = good_parabola[0:2] * y
     return good_parabola, good_index
 
 def get_parabola_y(coefficient, x):

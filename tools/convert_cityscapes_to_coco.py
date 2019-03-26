@@ -137,7 +137,8 @@ def convert_cityscapes_instance_only(
         'arrow_inclined_r',
         'arrow_r_s',
         'arrow_l_s',
-        'sidewalk'
+        'sidewalk',
+        'handrail'
     ]
     # category_instancesonly = ['__background__',
     #                           'ego vehicle',
@@ -191,6 +192,8 @@ def convert_cityscapes_instance_only(
             root = file_item[0]
             filename = file_item[1]
             if filename.endswith(ends_in):
+                if filename.startswith("shcity_000875_000002"):
+                    pass
                 if len(images) % 50 == 0:
                     print("Processed %s images, %s annotations" % (
                         len(images), len(annotations)))
