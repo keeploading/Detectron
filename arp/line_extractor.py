@@ -136,7 +136,7 @@ class LineExtractor(Config):
         parabola_params = self.optimize_parabola(perspective_img, curve_objs, img_debug, frame_id)
         if parabola_params is None or has_sidewalk:
             return im, mid_im, perspective_img, None, None
-        parabola_params, self.fork_pos = parabola_params
+        # parabola_params, self.fork_pos = parabola_params
         return im, mid_im, perspective_img, parabola_params, self.fork_pos
 
     def optimize_parabola(self, perspective_img, curve_objs, img_debug, frame_id):
@@ -193,13 +193,13 @@ class LineExtractor(Config):
 
             if Line.isBlockLine(curve_type) and parabolaC < 0:
                 if (left_boundary is None) or \
-                        ((not left_boundary is None) and left_boundary[-2] < parabola_param[-2]):
+                        ((left_boundary is not None) and left_boundary[-2] < parabola_param[-2]):
                     adjust_x = (curve_obj["start_x_right"] + curve_obj["end_x_right"]) / 2
                     parabola_param[5] = adjust_x
                     left_boundary = parabola_param
             if Line.isBlockLine(curve_type) and parabolaC > 0:
                 if (right_boundary is None) or \
-                        ((not right_boundary is None) and right_boundary[-2] > parabola_param[-2]):
+                        ((right_boundary is not None) and right_boundary[-2] > parabola_param[-2]):
                     adjust_x = (curve_obj["start_x_left"] + curve_obj["end_x_left"]) / 2
                     parabola_param[5] = adjust_x
                     right_boundary = parabola_param
@@ -209,12 +209,12 @@ class LineExtractor(Config):
 
         boundarys = [[left_boundary, right_boundary]]
 
-        is_fork = (not new_fork_pos is None)
+        is_fork = (new_fork_pos is not None)
         if not new_fork_pos is None:
             self.fork_endtime = time.time() + const.INTERVAL_FORK
             self.fork_pos = new_fork_pos
             is_fork = True
-        elif (not self.fork_endtime is None) and time.time() < self.fork_endtime:
+        elif (self.fork_endtime is not None) and time.time() < self.fork_endtime:
             is_fork = True
         else:
             is_fork = False
@@ -222,7 +222,7 @@ class LineExtractor(Config):
         is_fork_enable = const.ENABLE_FORK
         if is_fork and not is_fork_enable and len(parabola_param_np) > 0:
             keep_index = None
-            if self.fork_pos[0] < 0:
+            if self.fork_pos and self.fork_pos[0] < 0:
                 keep_index = parabola_param_np[:, -2] >= self.fork_pos[0]
             else:
                 print ("parabola_param_np:{}".format(parabola_param_np))
@@ -349,7 +349,7 @@ class LineExtractor(Config):
             cv2.polylines(perspective_img, np.int32([np.vstack((triangle_points[:,0], triangle_points[:,1])).T]), False, (0, 255, 0))
         print ("x_log parabola_param_np:" + str(x_log))
         print ('get parabola_param_np time: {:.3f}s'.format(time.time() - t))
-        return ret_parabola, (self.fork_pos if is_fork_enable else None)
+        return ret_parabola
 
     def vis_mask(self, img, perspective_img, curve_objs,  mask, col, perspective_color, classs_type, score, alpha=0.4, show_border=True, border_thick=1):
         """Visualizes a single binary mask."""
@@ -588,12 +588,12 @@ class LineExtractor(Config):
         return img
 
 
-    def vis_bbox(self, img, bbox, thick=4):
+    def vis_bbox(self, img, bbox, thick=1):
         """Visualizes a bounding box."""
         (x0, y0, w, h) = bbox
         x1, y1 = int(x0 + w), int(y0 + h)
         x0, y0 = int(x0), int(y0)
-        cv2.rectangle(img, (x0, y0), (x1, y1), _GREEN, thickness=thick)
+        cv2.rectangle(img, (x0, y0), (x1, y1), _WHITE, thickness=thick)
         return img
 
     def get_good_index(self, coefficient, suggest_index):

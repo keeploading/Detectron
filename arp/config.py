@@ -11,17 +11,18 @@ class Config(object):
     CURVETURE_MAX = 50.0 / (IMAGE_HEI * IMAGE_HEI)
 
     source_arr = np.float32([[916, 841], [1091, 841], [1103, 874], [903, 874]])
-    source_arr[:, 1] = source_arr[:, 1] - 604
-    CUT_OFFSET_IMG = np.array([277, 426])
+    # source_arr = np.float32([[907, 783], [1085, 783], [1098, 817], [892, 817]])
+    source_arr[:, 1] = source_arr[:, 1] - 504
+    CUT_OFFSET_IMG = np.array([252, 451])
     if const.CAMERA_TYPE == 1:
         print ("is_px2 is true")
-        source_arr = np.float32([[907, 783], [1085, 783], [1098, 817], [892, 817]])
-        source_arr[:, 1] = source_arr[:, 1] - 554
-        CUT_OFFSET_IMG = np.array([302, 451])
+        source_arr = np.float32([[907, 783], [1085, 783], [1098, 817], [893.5, 817]])
+        source_arr[:, 1] = source_arr[:, 1] - 454
+        CUT_OFFSET_IMG = np.array([227, 426])
     elif const.CAMERA_TYPE == 2:
         source_arr = np.float32([[852, 860], [1270, 860], [1396, 956], [764, 956]])
-        source_arr[:, 1] = source_arr[:, 1] - 670
-        CUT_OFFSET_IMG = np.array([330, 478])
+        source_arr[:, 1] = source_arr[:, 1] - 540
+        CUT_OFFSET_IMG = np.array([270, 478])
 
     scale_size = (const.CAMERA_TYPE != 2)
     is_px2 = (const.CAMERA_TYPE == 1)

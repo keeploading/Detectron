@@ -121,16 +121,38 @@ def initialize_gpu_from_weights_file(model, weights_file, gpu_id=0):
                 #             src_blobs[src_name] = src_blobs[src_name][-num]
                 #     elif dst_name is
 
+                cfg.MODEL.NUM_CLASSES
                 if ws_blob.shape != src_blobs[src_name].shape:
                     print ("ws_blob.shape != src_blobs[src_name].shape")
                     print ("-----------------" + str(ws_blob.shape) + "---------------" + str(src_blobs[src_name].shape))
                     if dst_name in classes_layers_list_w or dst_name in classes_layers_list_b:
                         if dst_name in classes_layers_list_w :
-                            src_blobs[src_name] = 0.0001 * np.random.randn(*(ws_blob.shape))
+                            target_shape = [ws_blob.shape[0] - src_blobs[src_name].shape[0]]
+                            target_shape.extend(list(ws_blob.shape[1:]))
+                            init_weight = 0.0001 * np.random.randn(*(tuple(target_shape)))
+                            src_blobs[src_name] = np.append(src_blobs[src_name], init_weight, axis=0)
                         else:
-                            src_blobs[src_name] = -np.log((1 - 0.00001) / 0.00001) * np.ones(*(ws_blob.shape))
+                            target_shape = [ws_blob.shape[0] - src_blobs[src_name].shape[0]]
+                            target_shape.extend(list(ws_blob.shape[1:]))
+                            init_weight = -np.log((1 - 0.00001) / 0.00001) * np.ones(*(tuple(target_shape)))
+                            src_blobs[src_name] = np.append(src_blobs[src_name], init_weight, axis=0)
 
-                        src_blobs[src_name + '_momentum'] = np.zeros(ws_blob.shape)
+                        target_shape = [ws_blob.shape[0] - src_blobs[src_name + '_momentum'].shape[0]]
+                        target_shape.extend(list(ws_blob.shape[1:]))
+                        init_weight = np.zeros(target_shape)
+                        src_blobs[src_name + '_momentum'] = np.append(src_blobs[src_name + '_momentum'], init_weight, axis=0)
+
+
+                # if ws_blob.shape != src_blobs[src_name].shape:
+                #     print ("ws_blob.shape != src_blobs[src_name].shape")
+                #     print ("-----------------" + str(ws_blob.shape) + "---------------" + str(src_blobs[src_name].shape))
+                #     if dst_name in classes_layers_list_w or dst_name in classes_layers_list_b:
+                #         if dst_name in classes_layers_list_w :
+                #             src_blobs[src_name] = 0.0001 * np.random.randn(*(ws_blob.shape))
+                #         else:
+                #             src_blobs[src_name] = -np.log((1 - 0.00001) / 0.00001) * np.ones(*(ws_blob.shape))
+                #
+                #         src_blobs[src_name + '_momentum'] = np.zeros(ws_blob.shape)
 
 
 

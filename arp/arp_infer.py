@@ -428,11 +428,13 @@ def main(args):
             time.sleep(0.001)
             #cv2.imwrite("tmp" + str(frameId) + ".png", img_np)
             if extractor.scale_size:
+                # img_np = cv2.resize(img_np, dsize=img_np.shape/2, interpolation=cv2.INTER_CUBIC)
                 img_np = img_np[::2]
                 img_np = img_np[:,::2]
             origin_im = np.copy(img_np)
 
             img_np = img_np[extractor.CUT_OFFSET_IMG[0]:extractor.CUT_OFFSET_IMG[1], 0:extractor.IMAGE_WID]
+            print ("detection size:", img_np.shape)
             # img_np = cv2.undistort(img_np, mtx, dist, None)
             hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
@@ -450,7 +452,7 @@ def show_debug_img():
             half_size = (int(im.shape[1] / 2), int(im.shape[0] / 2))
             if extractor.IMAGE_WID > 960:
                 im = cv2.resize(im, half_size)
-                top_im = cv2.resize(top_im, (960, 604))
+                top_im = cv2.resize(top_im, (extractor.IMAGE_WID/2, extractor.IMAGE_HEI/2))
 
                 mid_im = cv2.resize(mid_im, half_size)
                 # mid_im = mid_im[604:902, 0:extractor.IMAGE_WID]
