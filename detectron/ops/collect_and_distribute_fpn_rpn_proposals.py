@@ -49,18 +49,24 @@ class CollectAndDistributeFpnRpnProposalsOp(object):
             im_info = inputs[-1].data
             im_scales = im_info[:, 2]
             roidb = blob_utils.deserialize(inputs[-2].data)
+            # print ("roidb.keys()1:", roidb[0].keys())
             # For historical consistency with the original Faster R-CNN
             # implementation we are *not* filtering crowd proposals.
             # This choice should be investigated in the future (it likely does
             # not matter).
-            json_dataset.add_proposals(roidb, rois, im_scales, crowd_thresh=0)
+            im_origin_size = np.array(im_info[0][0:2])
+            im_origin_size = im_origin_size / im_info[0][2]
+            json_dataset.add_proposals(roidb, rois, im_scales, origin_im_size=im_origin_size, crowd_thresh=0)
             roidb_utils.add_bbox_regression_targets(roidb)
             # Compute training labels for the RPN proposals; also handles
             # distributing the proposals over FPN levels
             output_blob_names = fast_rcnn_roi_data.get_fast_rcnn_blob_names()
             blobs = {k: [] for k in output_blob_names}
+            # print ("roidb.keys():", roidb[0].keys())
             fast_rcnn_roi_data.add_fast_rcnn_blobs(blobs, im_scales, roidb)
             for i, k in enumerate(output_blob_names):
+                # print ("i,k:", i, k)
+                # print("ouput blob names, type:", type(blobs[k]))
                 blob_utils.py_op_copy_blob(blobs[k], outputs[i])
         else:
             # For inference we have a special code path that avoids some data
@@ -82,6 +88,7 @@ def collect(inputs, is_training):
     # rois are in [[batch_idx, x0, y0, x1, y2], ...] format
     # Combine predictions across all levels and retain the top scoring
     rois = np.concatenate([blob.data for blob in roi_inputs])
+    # print ("rois:", rois.shape)
     scores = np.concatenate([blob.data for blob in score_inputs]).squeeze()
     inds = np.argsort(-scores)[:post_nms_topN]
     rois = rois[inds, :]

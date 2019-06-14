@@ -32,39 +32,20 @@ def get_keypoints():
     # Keypoints are not available in the COCO json for the test split, so we
     # provide them here.
     keypoints = [
-        'nose',
-        'left_eye',
-        'right_eye',
-        'left_ear',
-        'right_ear',
-        'left_shoulder',
-        'right_shoulder',
-        'left_elbow',
-        'right_elbow',
-        'left_wrist',
-        'right_wrist',
-        'left_hip',
-        'right_hip',
-        'left_knee',
-        'right_knee',
-        'left_ankle',
-        'right_ankle',
+        'point1',
+        'point2',
+        'point3',
+        'point4'
     ]
-    # keypoints = [
-    #     'line1',
-    #     'line2',
-    #     'line3',
-    #     'line4'
-    # ]
     keypoint_flip_map = {
-        'left_eye': 'right_eye',
-        'left_ear': 'right_ear',
-        'left_shoulder': 'right_shoulder',
-        'left_elbow': 'right_elbow',
-        'left_wrist': 'right_wrist',
-        'left_hip': 'right_hip',
-        'left_knee': 'right_knee',
-        'left_ankle': 'right_ankle'
+        # 'left_eye': 'right_eye',
+        # 'left_ear': 'right_ear',
+        # 'left_shoulder': 'right_shoulder',
+        # 'left_elbow': 'right_elbow',
+        # 'left_wrist': 'right_wrist',
+        # 'left_hip': 'right_hip',
+        # 'left_knee': 'right_knee',
+        # 'left_ankle': 'right_ankle'
     }
     return keypoints, keypoint_flip_map
 
@@ -254,9 +235,7 @@ def compute_oks(src_keypoints, src_roi, dst_keypoints, dst_roi):
     dst_roi: Nx4
     """
 
-    sigmas = np.array([
-        .26, .25, .25, .35, .35, .79, .79, .72, .72, .62, .62, 1.07, 1.07, .87,
-        .87, .89, .89]) / 10.0
+    sigmas = np.array([1.1, 1.1, 1.1, 1.1]) / 10.0
     vars = (sigmas * 2)**2
 
     # area

@@ -44,7 +44,10 @@ import detectron.modeling.FPN as fpn
 import detectron.utils.blob as blob_utils
 import detectron.utils.boxes as box_utils
 import detectron.utils.image as image_utils
-import detectron.utils.keypoints as keypoint_utils
+if cfg.MODEL.SHAPE_POINTS_ON:
+    import detectron.utils.shapepoints as keypoint_utils
+else:
+    import detectron.utils.keypoints as keypoint_utils
 
 logger = logging.getLogger(__name__)
 
@@ -91,12 +94,12 @@ def im_detect_all(model, im, box_proposals, timers=None):
     else:
         cls_segms = None
 
-    if cfg.MODEL.KEYPOINTS_ON and boxes.shape[0] > 0:
+    if (cfg.MODEL.KEYPOINTS_ON or cfg.MODEL.SHAPE_POINTS_ON) and boxes.shape[0] > 0:
         timers['im_detect_keypoints'].tic()
         if cfg.TEST.KPS_AUG.ENABLED:
             heatmaps = im_detect_keypoints_aug(model, im, boxes)
         else:
-            heatmaps = im_detect_keypoints(model, im_scale, boxes)
+            heatmaps = im_detect_keypoints(model, im_scale, boxes)#100,4,56,56
         timers['im_detect_keypoints'].toc()
 
         timers['misc_keypoints'].tic()
@@ -559,11 +562,17 @@ def im_detect_keypoints(model, im_scale, boxes):
         pred_heatmaps = np.zeros((0, cfg.KRCNN.NUM_KEYPOINTS, M, M), np.float32)
         return pred_heatmaps
 
-    inputs = {'keypoint_rois': _get_rois_blob(boxes, im_scale)}
+    if cfg.MODEL.SHAPE_POINTS_ON:
+        inputs = {'shape_points_rois': _get_rois_blob(boxes, im_scale)}
+        # Add multi-level rois for FPN
+        if cfg.FPN.MULTILEVEL_ROIS:
+            _add_multilevel_rois_for_test(inputs, 'shape_points_rois')
 
-    # Add multi-level rois for FPN
-    if cfg.FPN.MULTILEVEL_ROIS:
-        _add_multilevel_rois_for_test(inputs, 'keypoint_rois')
+    else:
+        inputs = {'keypoint_rois': _get_rois_blob(boxes, im_scale)}
+        # Add multi-level rois for FPN
+        if cfg.FPN.MULTILEVEL_ROIS:
+            _add_multilevel_rois_for_test(inputs, 'keypoint_rois')
 
     for k, v in inputs.items():
         workspace.FeedBlob(core.ScopedName(k), v)
@@ -871,6 +880,7 @@ def keypoint_results(cls_boxes, pred_heatmaps, ref_boxes):
     num_classes = cfg.MODEL.NUM_CLASSES
     cls_keyps = [[] for _ in range(num_classes)]
     person_idx = keypoint_utils.get_person_class_index()
+
     xy_preds = keypoint_utils.heatmaps_to_keypoints(pred_heatmaps, ref_boxes)
 
     # NMS OKS

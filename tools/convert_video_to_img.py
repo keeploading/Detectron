@@ -67,7 +67,7 @@ def parse_args():
         '--subsample',
         dest='subsample',
         help='subsample from frames',
-        default=17,
+        default=37,
         type=str
     )
     parser.add_argument(
@@ -75,7 +75,7 @@ def parse_args():
         dest='output_dir',
         help='directory for visualization pdfs (default: /tmp/infer_simple)',
         # default='/media/administrator/deeplearning/self-labels/leftImg8bit/train/test',
-        default='/media/administrator/deeplearning/self-labels/test',
+        default='/media/administrator/deeplearning/self-labels/highway',
         type=str
     )
     return parser.parse_args()

@@ -35,11 +35,12 @@ def get_model(cfg_file, weights_file):
     model = infer_engine.initialize_model_from_cfg(weights_file)
     return model
 
-DETECTRON_ROOT = "/media/administrator/deeplearning/project/detectron"
-cfg_file = '{}/configs/12_2017_baselines/e2e_mask_rcnn_R-50-FPN_1x.yaml'.format(DETECTRON_ROOT)
-weights_file = '{}/train_output/train/coco_2014_train:coco_2014_valminusminival/generalized_rcnn/model_final.pkl'.format(DETECTRON_ROOT)
+DETECTRON_ROOT = "/media/administrator/deeplearning/detectron"
+# cfg_file = '{}/configs/12_2017_baselines/e2e_mask_rcnn_R-50-FPN_1x.yaml'.format(DETECTRON_ROOT)
+cfg_file = '{}/configs/12_2017_baselines/e2e_faster_rcnn_R-50-FPN_1x.yaml'.format(DETECTRON_ROOT)
+weights_file = '{}/output/cs_fpn/frcnn/train/cs_2017_shape_train:cs_2017_shape_val/generalized_rcnn/model_iter59999.pkl'.format(DETECTRON_ROOT)
 model = get_model(cfg_file, weights_file)
 
 from caffe2.python import net_drawer
 g = net_drawer.GetPydotGraph(model, rankdir="TB")
-g.write_dot(model.Proto().name + '.dot')
+g.write_dot(model.Proto().name + 'keypoint.dot')

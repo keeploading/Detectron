@@ -27,7 +27,10 @@ import numpy as np
 from detectron.core.config import cfg
 from detectron.datasets.json_dataset import JsonDataset
 import detectron.utils.boxes as box_utils
-import detectron.utils.keypoints as keypoint_utils
+if cfg.MODEL.SHAPE_POINTS_ON:
+    import detectron.utils.shapepoints as keypoint_utils
+else:
+    import detectron.utils.keypoints as keypoint_utils
 import detectron.utils.segms as segm_utils
 
 logger = logging.getLogger(__name__)
@@ -126,6 +129,10 @@ def filter_for_training(roidb):
         if cfg.MODEL.KEYPOINTS_ON:
             # If we're training for keypoints, exclude images with no keypoints
             valid = valid and entry['has_visible_keypoints']
+        if cfg.MODEL.SHAPE_POINTS_ON:
+            # If we're training for keypoints, exclude images with no keypoints
+            valid = valid and entry['has_shape_points']
+
         return valid
 
     num = len(roidb)
@@ -150,7 +157,7 @@ def compute_bbox_regression_targets(entry):
     labels = entry['max_classes']
     gt_inds = np.where((entry['gt_classes'] > 0) & (entry['is_crowd'] == 0))[0]
     # Targets has format (class, tx, ty, tw, th)
-    targets = np.zeros((rois.shape[0], 5), dtype=np.float32)
+    targets = np.zeros((rois.shape[0], 1+cfg.MODEL.BOX_VALUE_CNT), dtype=np.float32)
     if len(gt_inds) == 0:
         # Bail if the image has no ground-truth ROIs
         return targets

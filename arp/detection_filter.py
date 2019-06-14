@@ -1,8 +1,11 @@
 import numpy as np
 import time
 from detectron.utils.logging import setup_logging
-from arp.line_detection import lane_wid, get_parabola_by_distance
+from arp.config import Config
+IMAGE_HEI = Config.IMAGE_HEI
+lane_wid = Config.lane_wid
 from arp.lane_line import Line
+import arp.math_utils as math_utils
 
 #bind with detect spped, later
 AVAILABE_INTERVAL = 1
@@ -175,7 +178,7 @@ class LineFilter(object):
     
                     for index in range(len(self.cache_list)):
                         if (id + index) in match_id_array:
-                            self.cache_list[id]['curve_param'] = get_parabola_by_distance(self.cache_list[id + index]['curve_param'],
+                            self.cache_list[id]['curve_param'] = math_utils.get_parabola_by_distance(self.cache_list[id + index]['curve_param'],
                                                                                      self.cache_list[id]['x'] -
                                                                                      self.cache_list[id + index]['x'] + avg_move)
                             dalta = self.cache_list[id]['curve_param'][2] - self.cache_list[id]['x']
@@ -183,7 +186,7 @@ class LineFilter(object):
                             self.cache_list[id]['middle'] += dalta
                             break
                         elif (id - index) in match_id_array:
-                            self.cache_list[id]['curve_param'] = get_parabola_by_distance(self.cache_list[id - index]['curve_param'],
+                            self.cache_list[id]['curve_param'] = math_utils.get_parabola_by_distance(self.cache_list[id - index]['curve_param'],
                                                                                      self.cache_list[id]['x'] -
                                                                                      self.cache_list[id - index]['x'])
                             dalta = self.cache_list[id]['curve_param'][2] - self.cache_list[id]['x']

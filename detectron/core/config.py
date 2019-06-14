@@ -455,6 +455,9 @@ __C.MODEL.CLS_AGNOSTIC_BBOX_REG = False
 # These are empirically chosen to approximately lead to unit variance targets
 __C.MODEL.BBOX_REG_WEIGHTS = (10., 10., 5., 5.)
 
+__C.MODEL.BOX_VALUE_CNT = 4
+__C.MODEL.SHAPE_POINT_CNT = 4
+
 # The meaning of FASTER_RCNN depends on the context (training vs. inference):
 # 1) During training, FASTER_RCNN = True means that end-to-end training will be
 #    used to jointly train the RPN subnetwork and the Fast R-CNN subnetwork
@@ -473,6 +476,7 @@ __C.MODEL.MASK_ON = False
 # Indicates the model makes keypoint predictions (as in Mask R-CNN for
 # keypoints)
 __C.MODEL.KEYPOINTS_ON = False
+__C.MODEL.SHAPE_POINTS_ON = True
 
 # Indicates the model's computation terminates with the production of RPN
 # proposals (i.e., it outputs proposals ONLY, no actual object detections)

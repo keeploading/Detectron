@@ -25,7 +25,9 @@ import numpy as np
 import pylab as pl
 from pykalman import UnscentedKalmanFilter
 from numpy.linalg import cholesky
-from arp.line_detection import lane_wid, IMAGE_HEI
+from arp.config import Config
+IMAGE_HEI = Config.IMAGE_HEI
+lane_wid = Config.lane_wid
 
 
 #state (x y v theta w)

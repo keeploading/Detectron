@@ -74,6 +74,18 @@ _DATASETS = {
         _ANN_FN:
             _DATA_DIR + '/cs/annotations/instancesonly_filtered_image_val.json'
     },
+    'cs_2017_shape_train': {
+        _IM_DIR:
+            _DATA_DIR + '/cs/train',
+        _ANN_FN:
+            _DATA_DIR + '/cs/annotations/shape_train.json'
+    },
+    'cs_2017_shape_val': {
+        _IM_DIR:
+            _DATA_DIR + '/cs/val',
+        _ANN_FN:
+            _DATA_DIR + '/cs/annotations/shape_val.json'
+    },
     'cs_2017_minival': {
         _IM_DIR:
             _DATA_DIR + '/cs/val',

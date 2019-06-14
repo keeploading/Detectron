@@ -120,7 +120,7 @@ process_time = []
 show_img = None
 
 #im is rgb
-def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
+def hanle_frame(args, frameId, origin_im, im, logger, model, dataset, file_name):
     global predict_time, process_time, show_img
     logger.info('Processing frame: {}'.format(frameId))
 
@@ -169,7 +169,7 @@ def hanle_frame(args, frameId, origin_im, im, logger, model, dataset):
     filter_list = None
     if not result is None:
         line_list, cache_list, filter_list, particles = add2MsgQueue(result, frameId, fork_pos, img_debug)
-    g_debug_img_queue.put((origin_im[:, :, ::-1], im, mid_im, top_im, line_list, cache_list, filter_list, frameId, fork_pos))
+    g_debug_img_queue.put((origin_im[:, :, ::-1], im, mid_im, top_im, line_list, cache_list, filter_list, frameId, fork_pos, file_name))
     if g_debug_img_queue.full():
         try:
             g_debug_img_queue.get_nowait()
@@ -253,8 +253,8 @@ def add2MsgQueue(result, frameId, fork_x, img_debug):
     #     filter_list, particles = ret
 
     finalMessage = {'frame': frameId, 'timestamp': time.time(), 'is_fork': is_fork, 'line_list': full_line_list[0]}
-    print ("finalMessage:" + str(finalMessage))
     json_str = json.dumps(finalMessage)
+    print ("finalMessage:", json_str)
     if g_detect_queue.full():
         g_detect_queue.get_nowait()
     g_detect_queue.put(json_str)
@@ -380,8 +380,9 @@ def main(args):
     else:
         # From virtual camera video and its associated timestamp file on Drive PX2,e.g."./lane/videofilepath.h264"
         cap = cv2.VideoCapture(args.video)
-    im_file_index = 0
+    im_file_index = frameId
     while True:
+        file_name = ""
         if zmq_video:
             try:
                 socket.send_string('req from detectron')
@@ -408,6 +409,7 @@ def main(args):
         elif os.path.isdir(args.video):
             if im_file_index >= len(im_list):
                 break
+            file_name = im_list[im_file_index].split("/")[-1].split(".")[0]
             img_np = cv2.imread(im_list[im_file_index])
             img_np = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
             im_file_index += 1
@@ -436,7 +438,7 @@ def main(args):
             img_np = img_np[extractor.CUT_OFFSET_IMG[0]:extractor.CUT_OFFSET_IMG[1], 0:extractor.IMAGE_WID]
             print ("detection size:", img_np.shape)
             # img_np = cv2.undistort(img_np, mtx, dist, None)
-            hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset)
+            hanle_frame(args, frameId, origin_im, img_np, logger, model, dummy_coco_dataset, file_name)
             logger.info('hanle_frame time: {:.3f}s'.format(time.time() - t))
 
     raw_input('press Enter to exit...')
@@ -447,7 +449,7 @@ def show_debug_img():
     while(True):
         message = g_debug_img_queue.get(True)
         if not message is None:
-            origin_im, im, mid_im, top_im, line_list_array, cache_list_array, filter_list_array, frameId, fork_pos = message
+            origin_im, im, mid_im, top_im, line_list_array, cache_list_array, filter_list_array, frameId, fork_pos, file_name = message
 
             half_size = (int(im.shape[1] / 2), int(im.shape[0] / 2))
             if extractor.IMAGE_WID > 960:
@@ -523,8 +525,9 @@ def show_debug_img():
             origin_im = np.append(origin_im, top_im, axis=1)
             im = np.append(im, mid_im, axis=1)
             show_img = np.append(origin_im, im, axis=0)
-            cv2.imwrite(os.path.join(args.output_dir, "source_" + str(frameId) + ".png"), show_img)
-            cv2.imshow('carlab1', show_img)
+            file_name = "source_{}_{}.png".format(file_name, frameId)
+            cv2.imwrite(os.path.join(args.output_dir, file_name), show_img)
+            cv2.imshow("carlab", show_img)
             cv2.waitKey(1)
 
 

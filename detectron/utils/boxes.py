@@ -59,6 +59,8 @@ def boxes_area(boxes):
     w = (boxes[:, 2] - boxes[:, 0] + 1)
     h = (boxes[:, 3] - boxes[:, 1] + 1)
     areas = w * h
+    if np.all(areas < 0):
+        print ("boxes:{}".format(boxes))
     assert np.all(areas >= 0), 'Negative areas founds'
     return areas
 
@@ -213,14 +215,30 @@ def bbox_transform_inv(boxes, gt_boxes, weights=(1.0, 1.0, 1.0, 1.0)):
     gt_ctr_x = gt_boxes[:, 0] + 0.5 * gt_widths
     gt_ctr_y = gt_boxes[:, 1] + 0.5 * gt_heights
 
-    wx, wy, ww, wh = weights
+
+    wx, wy, ww, wh = weights[0:4]
     targets_dx = wx * (gt_ctr_x - ex_ctr_x) / ex_widths
     targets_dy = wy * (gt_ctr_y - ex_ctr_y) / ex_heights
     targets_dw = ww * np.log(gt_widths / ex_widths)
     targets_dh = wh * np.log(gt_heights / ex_heights)
 
     targets = np.vstack((targets_dx, targets_dy, targets_dw,
-                         targets_dh)).transpose()
+                         targets_dh))
+    targets = targets.transpose()
+
+    # if cfg.MODEL.SHAPE_POINTS_ON:
+    #     ex_points_x = boxes[:,4::2]
+    #     ex_points_y = boxes[:,5::2]
+    #     gt_points_x = gt_boxes[:,4::2]
+    #     gt_points_y = gt_boxes[:,5::2]
+    #     wp = (1.0, 1.0, 1.0, 1.0)
+    #     print ("ex_widths.shape:", ex_widths.shape)
+    #     targets_point_x = wp * (gt_points_x - ex_points_x) / np.broadcast_to(ex_widths, (4, len(ex_widths))).T
+    #     targets_point_y = wp * (gt_points_y - ex_points_y) / np.broadcast_to(ex_heights, (4, len(ex_heights))).T
+    #     targets_point = []
+    #     for x, y in zip(targets_point_x, targets_point_y):
+    #         targets_point.append(np.array(zip(x, y)).flatten())
+    #     targets = np.append(targets, targets_point, axis=1)
     return targets
 
 

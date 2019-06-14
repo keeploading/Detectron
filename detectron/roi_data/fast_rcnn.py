@@ -30,6 +30,7 @@ import numpy.random as npr
 from detectron.core.config import cfg
 import detectron.modeling.FPN as fpn
 import detectron.roi_data.keypoint_rcnn as keypoint_rcnn_roi_data
+import detectron.roi_data.shape_points_rcnn as shape_points_rcnn_roi_data
 import detectron.roi_data.mask_rcnn as mask_rcnn_roi_data
 import detectron.utils.blob as blob_utils
 import detectron.utils.boxes as box_utils
@@ -84,6 +85,23 @@ def get_fast_rcnn_blob_names(is_training=True):
         # 'keypoint_loss_normalizer': optional normalization factor to use if
         # cfg.KRCNN.NORMALIZE_BY_VISIBLE_KEYPOINTS is False.
         blob_names += ['keypoint_loss_normalizer']
+    if is_training and cfg.MODEL.SHAPE_POINTS_ON:
+        # 'keypoint_rois': RoIs sampled for training the keypoint prediction
+        # branch. Shape is (#instances, 5) in format (batch_idx, x1, y1, x2,
+        # y2).
+        blob_names += ['shape_points_rois']
+        # 'keypoint_locations_int32': index of keypoint in
+        # KRCNN.HEATMAP_SIZE**2 sized array. Shape is (#instances). Used in
+        # SoftmaxWithLoss.
+        blob_names += ['shape_points_locations_int32']
+        # 'keypoint_weights': weight assigned to each target in
+        # 'keypoint_locations_int32'. Shape is (#instances). Used in
+        # SoftmaxWithLoss.
+        blob_names += ['shape_points_weights']
+        # 'keypoint_loss_normalizer': optional normalization factor to use if
+        # cfg.KRCNN.NORMALIZE_BY_VISIBLE_KEYPOINTS is False.
+        blob_names += ['shape_points_loss_normalizer']
+
     if cfg.FPN.FPN_ON and cfg.FPN.MULTILEVEL_ROIS:
         # Support for FPN multi-level rois without bbox reg isn't
         # implemented (... and may never be implemented)
@@ -102,12 +120,19 @@ def get_fast_rcnn_blob_names(is_training=True):
                 for lvl in range(k_min, k_max + 1):
                     blob_names += ['keypoint_rois_fpn' + str(lvl)]
                 blob_names += ['keypoint_rois_idx_restore_int32']
+            if cfg.MODEL.SHAPE_POINTS_ON:
+                for lvl in range(k_min, k_max + 1):
+                    blob_names += ['shape_points_rois_fpn' + str(lvl)]
+                blob_names += ['shape_points_rois_idx_restore_int32']
     return blob_names
 
 
 def add_fast_rcnn_blobs(blobs, im_scales, roidb):
     """Add blobs needed for training Fast R-CNN style models."""
     # Sample training RoIs from each image and append them to the blob lists
+
+    # print("test11----------------------------------------------------------------------------------------------------------------")
+
     for im_i, entry in enumerate(roidb):
         frcn_blobs = _sample_rois(entry, im_scales[im_i], im_i)
         for k, v in frcn_blobs.items():
@@ -116,6 +141,7 @@ def add_fast_rcnn_blobs(blobs, im_scales, roidb):
     for k, v in blobs.items():
         if isinstance(v, list) and len(v) > 0:
             blobs[k] = np.concatenate(v)
+
     # Add FPN multilevel training RoIs, if configured
     if cfg.FPN.FPN_ON and cfg.FPN.MULTILEVEL_ROIS:
         _add_multilevel_rois(blobs)
@@ -125,7 +151,8 @@ def add_fast_rcnn_blobs(blobs, im_scales, roidb):
     valid = True
     if cfg.MODEL.KEYPOINTS_ON:
         valid = keypoint_rcnn_roi_data.finalize_keypoint_minibatch(blobs, valid)
-
+    if cfg.MODEL.SHAPE_POINTS_ON:
+        valid = shape_points_rcnn_roi_data.finalize_shape_points_minibatch(blobs, valid)
     return valid
 
 
@@ -136,7 +163,6 @@ def _sample_rois(roidb, im_scale, batch_idx):
     rois_per_image = int(cfg.TRAIN.BATCH_SIZE_PER_IM)
     fg_rois_per_image = int(np.round(cfg.TRAIN.FG_FRACTION * rois_per_image))
     max_overlaps = roidb['max_overlaps']
-
     # Select foreground RoIs as those with >= FG_THRESH overlap
     fg_inds = np.where(max_overlaps >= cfg.TRAIN.FG_THRESH)[0]
     # Guard against the case when an image has fewer than fg_rois_per_image
@@ -202,7 +228,10 @@ def _sample_rois(roidb, im_scale, batch_idx):
         keypoint_rcnn_roi_data.add_keypoint_rcnn_blobs(
             blob_dict, roidb, fg_rois_per_image, fg_inds, im_scale, batch_idx
         )
-
+    if cfg.MODEL.SHAPE_POINTS_ON:
+        shape_points_rcnn_roi_data.add_shape_points_rcnn_blobs(
+            blob_dict, roidb, fg_rois_per_image, fg_inds, im_scale, batch_idx
+        )
     return blob_dict
 
 
@@ -223,13 +252,13 @@ def _expand_bbox_targets(bbox_target_data):
         num_bbox_reg_classes = 2  # bg and fg
 
     clss = bbox_target_data[:, 0]
-    bbox_targets = blob_utils.zeros((clss.size, 4 * num_bbox_reg_classes))
+    bbox_targets = blob_utils.zeros((clss.size, cfg.MODEL.BOX_VALUE_CNT * num_bbox_reg_classes))
     bbox_inside_weights = blob_utils.zeros(bbox_targets.shape)
     inds = np.where(clss > 0)[0]
     for ind in inds:
         cls = int(clss[ind])
-        start = 4 * cls
-        end = start + 4
+        start = cfg.MODEL.BOX_VALUE_CNT * cls
+        end = start + cfg.MODEL.BOX_VALUE_CNT
         bbox_targets[ind, start:end] = bbox_target_data[ind, 1:]
         bbox_inside_weights[ind, start:end] = (1.0, 1.0, 1.0, 1.0)
     return bbox_targets, bbox_inside_weights
@@ -250,16 +279,20 @@ def _add_multilevel_rois(blobs):
         # Recall blob rois are in (batch_idx, x1, y1, x2, y2) format, hence take
         # the box coordinates from columns 1:5
         target_lvls = fpn.map_rois_to_fpn_levels(
-            blobs[rois_blob_name][:, 1:5], lvl_min, lvl_max
+            blobs[rois_blob_name][:, 1:(1+cfg.MODEL.BOX_VALUE_CNT)], lvl_min, lvl_max
         )
+        # print ("target_lvls1:", type(target_lvls))
+        # print ("target_lvls2:", target_lvls.shape)
+        # print ("target_lvls3:", target_lvls)
         # Add per FPN level roi blobs named like: <rois_blob_name>_fpn<lvl>
         fpn.add_multilevel_roi_blobs(
             blobs, rois_blob_name, blobs[rois_blob_name], target_lvls, lvl_min,
             lvl_max
         )
-
     _distribute_rois_over_fpn_levels('rois')
     if cfg.MODEL.MASK_ON:
         _distribute_rois_over_fpn_levels('mask_rois')
     if cfg.MODEL.KEYPOINTS_ON:
         _distribute_rois_over_fpn_levels('keypoint_rois')
+    if cfg.MODEL.SHAPE_POINTS_ON:
+        _distribute_rois_over_fpn_levels('shape_points_rois')

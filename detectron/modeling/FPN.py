@@ -31,6 +31,7 @@ from detectron.utils.net import get_group_gn
 import detectron.modeling.ResNet as ResNet
 import detectron.utils.blob as blob_utils
 import detectron.utils.boxes as box_utils
+from caffe2.python import workspace
 
 # Lowest and highest pyramid levels in the backbone network. For FPN, we assume
 # that all networks have 5 spatial reductions, each by a factor of 2. Level 1
@@ -520,7 +521,8 @@ def add_multilevel_roi_blobs(
     lvl_max: the coarest (lowest resolution) FPN level (e.g., 6)
     """
     rois_idx_order = np.empty((0, ))
-    rois_stacked = np.zeros((0, 5), dtype=np.float32)  # for assert
+    rois_stacked = np.zeros((0, cfg.MODEL.BOX_VALUE_CNT + 1), dtype=np.float32)  # for assert
+    # print ("rois:", str(rois))
     for lvl in range(lvl_min, lvl_max + 1):
         idx_lvl = np.where(target_lvls == lvl)[0]
         blobs[blob_prefix + '_fpn' + str(lvl)] = rois[idx_lvl, :]

@@ -230,6 +230,7 @@ def broadcast_parameters(model):
     on GPUs 1 through cfg.NUM_GPUS - 1.
     """
     if cfg.NUM_GPUS == 1:
+        print ("cfg.NUM_GPUS == 1")
         # no-op if only running on a single GPU
         return
 

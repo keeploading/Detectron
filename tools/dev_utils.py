@@ -91,3 +91,22 @@ def loss_curve():
     print ("finish write file :{}".format(cvs_file))
 # filter_line()
 # loss_curve()
+
+
+
+def filter_line():
+
+    file = "/media/administrator/deeplearning/detectron/output/pr/log_20190117"
+    f = open(file, 'r')
+    lines = f.readlines()
+    filter_lines = []
+    for line in lines:
+        if line.startswith("json_stats"):
+            line = line[12:]
+            filter_lines.append(line)
+    f.close()
+    file = file + "_json.txt"
+    f = open(file, "w")
+    f.writelines(filter_lines)
+    f.close()
+    print ("finish write file :{}".format(file))

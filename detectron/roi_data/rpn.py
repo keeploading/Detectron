@@ -115,7 +115,7 @@ def add_rpn_blobs(blobs, im_scales, roidb):
 
     valid_keys = [
         'has_visible_keypoints', 'boxes', 'segms', 'seg_areas', 'gt_classes',
-        'gt_overlaps', 'is_crowd', 'box_to_gt_ind_map', 'gt_keypoints'
+        'gt_overlaps', 'is_crowd', 'box_to_gt_ind_map', 'gt_keypoints', 'gt_shape_points', 'has_shape_points'
     ]
     minimal_roidb = [{} for _ in range(len(roidb))]
     for i, e in enumerate(roidb):
@@ -205,7 +205,7 @@ def _get_rpn_blobs(im_height, im_width, foas, all_anchors, gt_boxes):
         labels[enable_inds] = 0
     bg_inds = np.where(labels == 0)[0]
 
-    bbox_targets = np.zeros((num_inside, 4), dtype=np.float32)
+    bbox_targets = np.zeros((num_inside, cfg.MODEL.BOX_VALUE_CNT), dtype=np.float32)
     bbox_targets[fg_inds, :] = data_utils.compute_targets(
         anchors[fg_inds, :], gt_boxes[anchor_to_gt_argmax[fg_inds], :]
     )

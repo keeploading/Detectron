@@ -66,7 +66,7 @@ def add_fast_rcnn_outputs(model, blob_in, dim):
         blob_in,
         'bbox_pred',
         dim,
-        num_bbox_reg_classes * 4,
+        num_bbox_reg_classes * cfg.MODEL.BOX_VALUE_CNT,
         weight_init=gauss_fill(0.001),
         bias_init=const_fill(0.0)
     )

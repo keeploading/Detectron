@@ -47,6 +47,7 @@ from detectron.modeling.detector import DetectionModelHelper
 from detectron.roi_data.loader import RoIDataLoader
 import detectron.modeling.fast_rcnn_heads as fast_rcnn_heads
 import detectron.modeling.keypoint_rcnn_heads as keypoint_rcnn_heads
+import detectron.modeling.shape_points_rcnn_heads as shape_points_rcnn_heads
 import detectron.modeling.mask_rcnn_heads as mask_rcnn_heads
 import detectron.modeling.name_compat as name_compat
 import detectron.modeling.optimizer as optim
@@ -181,6 +182,7 @@ def build_generic_detection_model(
             'box': None,
             'mask': None,
             'keypoints': None,
+            'shape_points': None,
         }
 
         if cfg.RPN.RPN_ON:
@@ -210,6 +212,12 @@ def build_generic_detection_model(
                 spatial_scale_conv
             )
 
+        if cfg.MODEL.SHAPE_POINTS_ON:
+            # Add the shape_points head
+            head_loss_gradients['shape_points'] = _add_roi_shape_points_head(
+                model, add_roi_keypoint_head_func, blob_conv, dim_conv,
+                spatial_scale_conv
+            )
         if cfg.MODEL.KEYPOINTS_ON:
             # Add the keypoint head
             head_loss_gradients['keypoint'] = _add_roi_keypoint_head(
@@ -320,6 +328,34 @@ def _add_roi_keypoint_head(
         loss_gradients = keypoint_rcnn_heads.add_keypoint_losses(model)
     return loss_gradients
 
+def _add_roi_shape_points_head(
+    model, add_roi_shape_points_head_func, blob_in, dim_in, spatial_scale_in
+):
+    """Add a keypoint prediction head to the model."""
+    # Capture model graph before adding the mask head
+    bbox_net = copy.deepcopy(model.net.Proto())
+    # Add the keypoint head
+    blob_shape_points_head, dim_shape_points_head = add_roi_shape_points_head_func(
+        model, blob_in, dim_in, spatial_scale_in
+    )
+    # Add the keypoint output
+    blob_shape_points = shape_points_rcnn_heads.add_shape_points_outputs(
+        model, blob_shape_points_head, dim_shape_points_head
+    )
+
+    if not model.train:  # == inference
+        # Inference uses a cascade of box predictions, then keypoint predictions
+        # This requires separate nets for box and keypoint prediction.
+        # So we extract the keypoint prediction net, store it as its own
+        # network, then restore model.net to be the bbox-only network
+        model.keypoint_net, keypoint_blob_out = c2_utils.SuffixNet(
+            'keypoint_net', model.net, len(bbox_net.op), blob_shape_points
+        )
+        model.net._net = bbox_net
+        loss_gradients = None
+    else:
+        loss_gradients = shape_points_rcnn_heads.add_shape_points_losses(model)
+    return loss_gradients
 
 def build_generic_rfcn_model(model, add_conv_body_func, dim_reduce=None):
     # TODO(rbg): fold this function into build_generic_detection_model
@@ -415,7 +451,7 @@ def add_inference_inputs(model):
     create_input_blobs_for_net(model.net.Proto())
     if cfg.MODEL.MASK_ON:
         create_input_blobs_for_net(model.mask_net.Proto())
-    if cfg.MODEL.KEYPOINTS_ON:
+    if cfg.MODEL.KEYPOINTS_ON or cfg.MODEL.SHAPE_POINTS_ON:
         create_input_blobs_for_net(model.keypoint_net.Proto())
 
 

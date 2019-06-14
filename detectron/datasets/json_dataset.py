@@ -138,7 +138,10 @@ class JsonDataset(object):
         entry['flipped'] = False
         entry['has_visible_keypoints'] = False
         # Empty placeholders
-        entry['boxes'] = np.empty((0, 4), dtype=np.float32)
+        entry['boxes'] = np.empty((0, cfg.MODEL.BOX_VALUE_CNT), dtype=np.float32)
+        if cfg.MODEL.SHAPE_POINTS_ON:
+            entry['gt_shape_points'] = np.empty((0, 3, cfg.MODEL.SHAPE_POINT_CNT), dtype=np.float32)
+            entry['has_shape_points'] = False
         entry['segms'] = []
         entry['gt_classes'] = np.empty((0), dtype=np.int32)
         entry['seg_areas'] = np.empty((0), dtype=np.float32)
@@ -167,6 +170,7 @@ class JsonDataset(object):
         valid_segms = []
         width = entry['width']
         height = entry['height']
+        has_shape_points = cfg.MODEL.SHAPE_POINTS_ON
         for obj in objs:
             # crowd regions are RLE encoded and stored as dicts
             if isinstance(obj['segmentation'], list):
@@ -190,7 +194,9 @@ class JsonDataset(object):
                 valid_segms.append(obj['segmentation'])
         num_valid_objs = len(valid_objs)
 
-        boxes = np.zeros((num_valid_objs, 4), dtype=entry['boxes'].dtype)
+        boxes = np.zeros((num_valid_objs, cfg.MODEL.BOX_VALUE_CNT), dtype=entry['boxes'].dtype)
+        if has_shape_points:
+            gt_shape_points = np.zeros((num_valid_objs, 3, cfg.MODEL.SHAPE_POINT_CNT), dtype=entry['gt_shape_points'].dtype)
         gt_classes = np.zeros((num_valid_objs), dtype=entry['gt_classes'].dtype)
         gt_overlaps = np.zeros(
             (num_valid_objs, self.num_classes),
@@ -208,9 +214,14 @@ class JsonDataset(object):
             )
 
         im_has_visible_keypoints = False
+        im_has_valid_shape_points = False
         for ix, obj in enumerate(valid_objs):
             cls = self.json_category_id_to_contiguous_id[obj['category_id']]
             boxes[ix, :] = obj['clean_bbox']
+            if has_shape_points and len(obj['shape_points']) > 0:
+                gt_shape_points[ix, :, :] = np.array(obj['shape_points']).reshape((cfg.MODEL.SHAPE_POINT_CNT, 3)).T
+                if np.sum(gt_shape_points[ix, :, :]) > 0:
+                    im_has_valid_shape_points = True
             gt_classes[ix] = cls
             seg_areas[ix] = obj['area']
             is_crowd[ix] = obj['iscrowd']
@@ -226,6 +237,10 @@ class JsonDataset(object):
             else:
                 gt_overlaps[ix, cls] = 1.0
         entry['boxes'] = np.append(entry['boxes'], boxes, axis=0)
+        if has_shape_points:
+            entry['gt_shape_points'] = np.append(entry['gt_shape_points'], gt_shape_points, axis=0)
+            entry['has_shape_points'] = im_has_valid_shape_points
+            print ("entry['gt_shape_points']:", entry['gt_shape_points'])
         entry['segms'].extend(valid_segms)
         # To match the original implementation:
         # entry['boxes'] = np.append(
@@ -240,6 +255,7 @@ class JsonDataset(object):
         entry['box_to_gt_ind_map'] = np.append(
             entry['box_to_gt_ind_map'], box_to_gt_ind_map
         )
+        print ("len(entry['box_to_gt_ind_map'])", len(entry['box_to_gt_ind_map']))
         if self.keypoints is not None:
             entry['gt_keypoints'] = np.append(
                 entry['gt_keypoints'], gt_keypoints, axis=0
@@ -304,7 +320,8 @@ class JsonDataset(object):
                 'left_wrist': 'right_wrist',
                 'left_hip': 'right_hip',
                 'left_knee': 'right_knee',
-                'left_ankle': 'right_ankle'}
+                'left_ankle': 'right_ankle'
+            }
 
     def _get_gt_keypoints(self, obj):
         """Return ground truth keypoints."""
@@ -326,7 +343,7 @@ class JsonDataset(object):
         return gt_kps
 
 
-def add_proposals(roidb, rois, scales, crowd_thresh):
+def add_proposals(roidb, rois, scales, origin_im_size = None, crowd_thresh=0):
     """Add proposal boxes (rois) to an roidb that has ground-truth annotations
     but no proposals. If the proposals are not at the original image scale,
     specify the scale factor that separate them in scales.
@@ -336,6 +353,35 @@ def add_proposals(roidb, rois, scales, crowd_thresh):
         inv_im_scale = 1. / scales[i]
         idx = np.where(rois[:, 0] == i)[0]
         box_list.append(rois[idx, 1:] * inv_im_scale)
+
+    # print ("origin_im_size:", origin_im_size)
+    # img_wid = origin_im_size[1]
+    # img_hei = origin_im_size[0]
+    # box_list = np.array(box_list)
+    # print ("box_list.shape:", box_list[0].shape)
+    # # boxs_with_shapepoint = np.zeros((len(box_list), box_list[0].shape[0], box_list[0].shape[1] + 8), box_list.dtype)
+    # for parent_index, boxs in enumerate(box_list):
+    #     new_box = np.zeros((boxs.shape[0], boxs.shape[1] + 8), box_list.dtype)
+    #     for index, box in enumerate(boxs):
+    #         box_wid_step = (box[2] - box[0])/4.
+    #         box_hei_step = (box[3] - box[1])/4.
+    #         if (box[0] + box[2]) < img_wid:
+    #             shape_points = [box[0], box[3],
+    #                             box[0] + box_wid_step, box[3] - box_hei_step,
+    #                             box[0] + 2*box_wid_step, box[3] - 2*box_hei_step,
+    #                             box[0] + 3*box_wid_step, box[3] - 3*box_hei_step,
+    #                             ]
+    #             new_box[index] = np.append(box, shape_points)
+    #         else:
+    #             shape_points = [box[2], box[3],
+    #                             box[2] - box_wid_step, box[3] - box_hei_step,
+    #                             box[2] - 2*box_wid_step, box[3] - 2*box_hei_step,
+    #                             box[2] - 3*box_wid_step, box[3] - 3*box_hei_step,
+    #                             ]
+    #             new_box[index] = np.append(box, shape_points)
+    #
+    #     box_list[parent_index] = new_box
+
     _merge_proposal_boxes_into_roidb(roidb, box_list)
     if crowd_thresh > 0:
         _filter_crowd_proposals(roidb, crowd_thresh)
